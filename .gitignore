@@ -1,0 +1,102 @@
+# =============================================================================
+# Self-Correcting Multi-Agent AI – Git ignore
+# =============================================================================
+
+# --- Environment & secrets ---
+.env
+.env.local
+.env.*.local
+*.pem
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+.env.example
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Unit / test
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# --- Node / frontend ---
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+
+# Build output
+frontend/dist/
+*.local
+
+# Vite
+.vite/
+
+# --- IDE / editor ---
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# --- OS ---
+.DS_Store
+.DS_Store?
+Thumbs.db
+ehthumbs.db
+
+# --- Logs & temp ---
+*.log
+logs/
+tmp/
+temp/
+*.tmp
+*.temp
+*.bak
+
+# --- Database (local / dev only; do not commit DB files) ---
+*.db
+*.sqlite
+*.sqlite3
+
+# --- Docker (optional; uncomment if you don't want to track) ---
+# docker-compose.override.yml
+
+# --- Project-specific ---
+# Keep backend/data/ if it's curated corpus; ignore large or generated data if needed
+# backend/data/*.csv
+# backend/data/*.json.bak

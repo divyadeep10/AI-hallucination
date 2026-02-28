@@ -1,0 +1,15 @@
+[
+  {
+    "source": "https://en.wikipedia.org/wiki/Python_(programming_language)",
+    "text": "Python is a high-level, general-purpose programming language. Python was conceived in the late 1980s and its implementation began in December 1989 by Guido van Rossum at Centrum Wiskunde & Informatica (CWI) in the Netherlands as a successor to the ABC programming language. Python 0.9.0 was released in February 1991."
+  },
+  {
+    "source": "https://en.wikipedia.org/wiki/C%2B%2B",
+    "text": "C++ is a high-level, general-purpose programming language created by Danish computer scientist Bjarne Stroustrup. It was first released in 1985 as an extension of the C programming language."
+  },
+  {
+    "source": "https://www.rfc-editor.org/rfc/rfc2616",
+    "text": "The Hypertext Transfer Protocol (HTTP) is an application-level protocol for distributed, collaborative, hypermedia information systems. HTTP has been in use by the World-Wide Web global information initiative since 1990. This specification defines the protocol referred to as HTTP/1.1."
+  }
+]
+

@@ -1,0 +1,5 @@
+[
+  {"query": "What is TCP and what is it used for?"},
+  {"query": "Why does TCP perform poorly in wireless networks?"},
+  {"query": "How does QUIC differ from TCP?"}
+]
