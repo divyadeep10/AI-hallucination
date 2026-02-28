@@ -18,11 +18,13 @@ def _load_dotenv() -> None:
 _load_dotenv()
 
 
-# Enable/disable external retrieval (set to "false" to skip web search).
-# When true, Playwright runs only when no evidence was found from internal KB.
+# Enable/disable external retrieval (second layer). When true, Playwright always runs
+# after internal retrieval; internal + external evidence are combined.
 EXTERNAL_RETRIEVAL_ENABLED: bool = os.getenv("EXTERNAL_RETRIEVAL_ENABLED", "true").lower() in ("true", "1", "yes")
 
-# Search engine URL (default: Google)
+# Search engines/sources: comma-separated (tries in order until success)
+# Options: google, wikipedia, duckduckgo, direct
+SEARCH_SOURCES: str = os.getenv("EXTERNAL_SEARCH_SOURCES", "wikipedia,google").strip()
 SEARCH_BASE_URL: str = os.getenv("EXTERNAL_SEARCH_BASE_URL", "https://www.google.com").rstrip("/")
 
 # Number of result pages to scrape (top N)
@@ -49,5 +51,7 @@ EXTERNAL_CHUNK_TOKENS: int = int(os.getenv("EXTERNAL_CHUNK_TOKENS", "400"))
 EXTERNAL_CHUNK_OVERLAP: int = int(os.getenv("EXTERNAL_CHUNK_OVERLAP", "50"))
 
 # Optional: proxy for Playwright (e.g. http://user:pass@host:port). Empty = no proxy.
-# Use for IP rotation / residential proxies if you get blocked.
 EXTERNAL_PLAYWRIGHT_PROXY: Optional[str] = os.getenv("EXTERNAL_PLAYWRIGHT_PROXY") or None
+
+# Block images, stylesheets, fonts to speed up and reduce fingerprint (default false)
+PLAYWRIGHT_BLOCK_RESOURCES: bool = os.getenv("PLAYWRIGHT_BLOCK_RESOURCES", "false").lower() in ("true", "1", "yes")

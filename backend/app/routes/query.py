@@ -33,6 +33,21 @@ from app.schemas import (
 
 router = APIRouter(prefix="/api", tags=["query"])
 
+# Status priority for picking "best" verification when a claim has multiple (e.g. internal + external)
+_VERIFICATION_STATUS_PRIORITY = {"SUPPORTED": 0, "CONTRADICTED": 1, "UNCERTAIN": 2, "NO_EVIDENCE": 3}
+
+
+def _best_verification_for_claim(verifications: list) -> Verification | None:
+    """Pick the best verification when multiple exist (e.g. internal NO_EVIDENCE + external SUPPORTED)."""
+    if not verifications:
+        return None
+    def priority(v):
+        status = (v.status or "").strip().upper() or "NO_EVIDENCE"
+        rank = _VERIFICATION_STATUS_PRIORITY.get(status, 3)
+        has_evidence = 0 if (v.evidence_id is not None) else 1
+        return (rank, has_evidence)
+    return min(verifications, key=priority)
+
 
 @router.post("/query", response_model=QueryResponse, status_code=status.HTTP_201_CREATED)
 async def create_query(payload: QueryRequest, db: Session = Depends(get_db)) -> QueryResponse:
@@ -283,10 +298,16 @@ def list_workflow_claims(
         .order_by(Claim.id.asc())
         .all()
     )
+    claim_ids = [c.id for c in claims]
+    all_verifications = (
+        db.query(Verification).filter(Verification.claim_id.in_(claim_ids)).all() if claim_ids else []
+    )
+    by_claim: dict[int, list] = {}
+    for v in all_verifications:
+        by_claim.setdefault(v.claim_id, []).append(v)
     verification_map = {
-        v.claim_id: v
-        for v in db.query(Verification).filter(Verification.claim_id.in_([c.id for c in claims]))
-    } if claims else {}
+        cid: _best_verification_for_claim(vlist) for cid, vlist in by_claim.items()
+    }
 
     result: list[ClaimResponse] = []
     for c in claims:
@@ -339,10 +360,15 @@ def get_workflow_debug(
         .all()
     )
     claim_ids = [c.id for c in claims]
-    verification_map = (
-        {v.claim_id: v for v in db.query(Verification).filter(Verification.claim_id.in_(claim_ids)).all()}
-        if claim_ids else {}
+    all_verifications_list = (
+        db.query(Verification).filter(Verification.claim_id.in_(claim_ids)).all() if claim_ids else []
     )
+    by_claim_debug: dict[int, list] = {}
+    for v in all_verifications_list:
+        by_claim_debug.setdefault(v.claim_id, []).append(v)
+    verification_map = {
+        cid: _best_verification_for_claim(vlist) for cid, vlist in by_claim_debug.items()
+    }
     verifications = (
         db.query(Verification).filter(Verification.claim_id.in_(claim_ids)).order_by(Verification.id.asc()).all()
         if claim_ids else []
@@ -360,7 +386,7 @@ def get_workflow_debug(
             entities=c.entities or [],
             extraction_confidence=c.extraction_confidence,
             verification_status=(v := verification_map.get(c.id)) and v.status or None,
-            verification_confidence=(v and v.confidence_score),
+            verification_confidence=(v and v.confidence_score) if v else None,
         )
         for c in claims
     ]

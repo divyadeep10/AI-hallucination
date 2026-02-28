@@ -1,20 +1,20 @@
 # External Retrieval Layer
 
-When **no evidence is found** from internal (knowledge-base) retrieval, the pipeline can run a **second retrieval layer** using web search (Playwright), then re-verify claims with the same NLI pipeline and mark evidence as external. You can turn this on or off with **`EXTERNAL_RETRIEVAL_ENABLED`** in `.env`.
+**Permanent second retrieval layer:** internal (knowledge-base) retrieval runs first, then Playwright (web search) always runs when enabled. Both layers’ evidence are **combined**; Critic and Refiner see internal + external evidence. Turn the second layer on or off with **`EXTERNAL_RETRIEVAL_ENABLED`** in `.env`.
 
 ## Flow
 
-1. **Verification** runs as usual (internal evidence → NLI → Verification rows).
-2. **External retrieval agent** runs next (only if `EXTERNAL_RETRIEVAL_ENABLED` is true):
-   - Counts internal evidence (Evidence rows with `is_external=False` for this workflow’s claims).
-   - If **any internal evidence exists**, it does nothing.
-   - If **no internal evidence** was found:
-     - Runs web search (Google) via Playwright with the workflow’s `user_query`.
-     - Scrapes the **top 3** result pages (configurable).
-     - Extracts and chunks page text.
-     - For each claim, selects relevant chunks and runs the same `verify_claim_with_evidence` NLI.
-     - Stores new **Evidence** rows with `is_external=True` and **Verification** rows for the new evidence.
-3. **Critic** and **Refiner** then run as before (they see both internal and external evidence).
+1. **Internal retrieval** (RetrieverAgent): hybrid search over KB → Evidence rows (`is_external=False`).
+2. **Verification** runs: NLI over internal evidence → Verification rows.
+3. **External retrieval agent** runs next (only if `EXTERNAL_RETRIEVAL_ENABLED` is true):
+   - Always runs web search (Google) via Playwright with the workflow’s `user_query`.
+   - Scrapes the **top 3** result pages (configurable).
+   - Extracts and chunks page text.
+   - For each claim, selects relevant chunks and runs the same `verify_claim_with_evidence` NLI.
+   - Stores new **Evidence** rows with `is_external=True` and **Verification** rows for the new evidence.
+4. **Critic** and **Refiner** see **both** internal and external evidence.
+
+No check for “no internal evidence”; Playwright is a fixed second layer when enabled.
 
 ## Layout
 
@@ -24,30 +24,30 @@ When **no evidence is found** from internal (knowledge-base) retrieval, the pipe
   - **`scraper.py`** – HTML → main text extraction (strip script/style, normalize).
   - **`chunker.py`** – chunk scraped text for NLI (same idea as internal KB).
   - **`pipeline.py`** – `run_external_pipeline(query)` → list of `{snippet, source_url, is_external=True}`.
-- **`backend/app/agents/external_retrieval.py`** – agent that checks `EXTERNAL_RETRIEVAL_ENABLED`, then “no internal evidence”; runs pipeline and stores external evidence and verifications.
+- **`backend/app/agents/external_retrieval.py`** – agent that runs when `EXTERNAL_RETRIEVAL_ENABLED` is true; runs pipeline and stores external evidence and verifications (combined with internal).
 
-## Playwright: Reducing Blocking
+## Playwright: Scraping Best Practices
 
-- **Random delays** between actions (`PLAYWRIGHT_DELAY_MIN` / `PLAYWRIGHT_DELAY_MAX`).
-- **Typing delay** per character (`PLAYWRIGHT_TYPE_DELAY_MS`).
-- **Realistic User-Agent** and viewport (e.g. Chrome on Windows).
-- **Launch args**: `--disable-blink-features=AutomationControlled`, `--no-sandbox`, etc.
-- **Single session**: one browser for search + scraping top N pages; short, linear flow.
-- **Locale/timezone** set (e.g. `en-US`, `America/New_York`).
-
-Optional: for stricter environments, consider proxy rotation or `playwright-stealth`; the current setup aims to look like a normal user without extra infra.
+- **Explicit waits**: `wait_for_selector(..., state="visible")` for search input and results container instead of only fixed delays.
+- **Stable selectors**: `textarea[name="q"]`, `div#search`, `div#search a[href^='http']` (semantic/structure).
+- **Extract with evaluate_all**: `locator.evaluate_all("(el) => el.href")` to get hrefs from DOM in one shot; dedupe/filter in Python.
+- **Retries**: One retry for link collection if first run returns 0 links; per-URL scrape retries (2 attempts).
+- **Optional resource blocking**: Set `PLAYWRIGHT_BLOCK_RESOURCES=true` to block images/stylesheets/fonts (faster, less fingerprint).
+- **Consent banner**: Clicks "Accept all" / "I agree" if visible before interacting with search.
+- **Human-like**: Random delays, typing delay, real UA/viewport, `--disable-blink-features=AutomationControlled`.
 
 ## Configuration (.env)
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `EXTERNAL_RETRIEVAL_ENABLED` | `true` | Set to `false` to disable external search entirely; when `true`, Playwright runs only when no internal evidence was found. |
+| `EXTERNAL_RETRIEVAL_ENABLED` | `true` | Set to `false` to disable the second layer; when `true`, Playwright always runs and evidence is combined with internal. |
 | `EXTERNAL_TOP_N_PAGES` | `3` | Number of result pages to scrape. |
 | `EXTERNAL_SEARCH_BASE_URL` | `https://www.google.com` | Search engine base URL. |
 | `PLAYWRIGHT_HEADLESS` | `true` | Run browser headless. |
 | `PLAYWRIGHT_TIMEOUT_MS` | `30000` | Page load timeout. |
 | `PLAYWRIGHT_DELAY_MIN` / `PLAYWRIGHT_DELAY_MAX` | `2.0` / `5.0` | Min/max delay (seconds) between actions. |
 | `PLAYWRIGHT_TYPE_DELAY_MS` | `80` | Delay per character when typing the query. |
+| `PLAYWRIGHT_BLOCK_RESOURCES` | `false` | Set to `true` to block images/stylesheets/fonts (faster, less fingerprint). |
 
 ## Setup
 

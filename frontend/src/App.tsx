@@ -1,8 +1,6 @@
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, Fragment, useEffect, useRef, useState } from "react";
 import {
   fetchEvidenceForClaim,
-  fetchEvaluationRunDetail,
-  fetchEvaluationRuns,
   fetchWorkflowClaims,
   fetchWorkflowDebug,
   fetchWorkflowResponses,
@@ -11,8 +9,6 @@ import {
   startWorkflowAsync,
   Claim,
   Evidence,
-  EvaluationRunDetail,
-  EvaluationRunSummary,
   StoredResponse,
   WorkflowDebugPayload,
   WorkflowStatus,
@@ -124,13 +120,63 @@ function getStageTimestamp(stage: (typeof TIMELINE_STAGES)[0], responses: Stored
   return null;
 }
 
-function getVerificationStatusClass(status: string | null | undefined): string {
-  if (!status) return "claim-status-none";
+function getVerificationStatusBorderClass(status: string | null | undefined): string {
+  if (!status) return "border-l-amber-500";
   const s = (status || "").toUpperCase();
-  if (s === "SUPPORTED") return "claim-status-supported";
-  if (s === "CONTRADICTED") return "claim-status-contradicted";
-  if (s === "UNCERTAIN" || s === "NO_EVIDENCE") return "claim-status-uncertain";
-  return "claim-status-none";
+  if (s === "SUPPORTED") return "border-l-emerald-500";
+  if (s === "CONTRADICTED") return "border-l-red-500";
+  return "border-l-amber-500";
+}
+
+function getVerificationStatusBadgeClass(status: string | null | undefined): string {
+  if (!status) return "bg-amber-500/20 text-amber-200";
+  const s = (status || "").toUpperCase();
+  if (s === "SUPPORTED") return "bg-emerald-500/20 text-emerald-300";
+  if (s === "CONTRADICTED") return "bg-red-500/20 text-red-300";
+  return "bg-amber-500/20 text-amber-200";
+}
+
+function getStatusBadgeClass(status: string): string {
+  const s = (status || "").toLowerCase();
+  if (["completed", "refined", "verified", "critic_reviewed", "evidence_retrieved", "claims_extracted", "generated", "planned", "created"].includes(s))
+    return "bg-emerald-500/20 text-emerald-300";
+  if (s === "failed") return "bg-red-500/20 text-red-300";
+  return "bg-slate-700 text-slate-400";
+}
+
+/** Renders text with **bold** and *italic* parsed; newlines preserved. Avoids showing raw asterisks. */
+function formatResponseText(text: string): React.ReactNode {
+  if (!text) return null;
+  const lines = text.split(/\n/);
+  return (
+    <>
+      {lines.map((line, lineIdx) => (
+        <Fragment key={lineIdx}>
+          {lineIdx > 0 && <br />}
+          {parseInlineMarkdown(line, lineIdx)}
+        </Fragment>
+      ))}
+    </>
+  );
+}
+
+function parseInlineMarkdown(line: string, lineKey: number): React.ReactNode {
+  const parts = line.split(/(\*\*|\*)/g);
+  const nodes: React.ReactNode[] = [];
+  let i = 0;
+  while (i < parts.length) {
+    if (parts[i] === "**" && i + 2 < parts.length) {
+      nodes.push(<strong key={`${lineKey}-${i}`}>{parts[i + 1]}</strong>);
+      i += 3;
+    } else if (parts[i] === "*" && i + 2 < parts.length && parts[i + 1] !== "*") {
+      nodes.push(<em key={`${lineKey}-${i}`}>{parts[i + 1]}</em>);
+      i += 3;
+    } else {
+      nodes.push(parts[i]);
+      i += 1;
+    }
+  }
+  return <>{nodes}</>;
 }
 
 export function App() {
@@ -150,14 +196,6 @@ export function App() {
   const [isLoadingClaims, setIsLoadingClaims] = useState(false);
   const [isLoadingDebug, setIsLoadingDebug] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Phase 8: Evaluation view
-  const [activeView, setActiveView] = useState<"query" | "evaluation">("query");
-  const [evaluationRuns, setEvaluationRuns] = useState<EvaluationRunSummary[] | null>(null);
-  const [evaluationRunDetail, setEvaluationRunDetail] = useState<EvaluationRunDetail | null>(null);
-  const [selectedRunId, setSelectedRunId] = useState<number | null>(null);
-  const [isLoadingRuns, setIsLoadingRuns] = useState(false);
-  const [isLoadingRunDetail, setIsLoadingRunDetail] = useState(false);
-  const [evaluationError, setEvaluationError] = useState<string | null>(null);
 
   // Polling state and refs
   const pollingIntervalRef = useRef<number | null>(null);
@@ -314,28 +352,17 @@ export function App() {
     isPollingRef.current = false;
   };
 
-  // Auto-polling effect: start/stop based on workflowId and view
+  // Auto-polling effect: start/stop based on workflowId
   useEffect(() => {
-    // Only poll in query view
-    if (activeView !== "query") {
-      stopPolling();
-      return;
-    }
-
-    // Only poll if we have an active workflow
     if (!state.workflowId) {
       stopPolling();
       return;
     }
-
-    // Start polling
     startPolling(state.workflowId);
-
-    // Cleanup on unmount or when dependencies change
     return () => {
       stopPolling();
     };
-  }, [state.workflowId, activeView]);
+  }, [state.workflowId]);
 
   // Also stop polling when workflow reaches terminal state (backup check)
   useEffect(() => {
@@ -496,29 +523,6 @@ export function App() {
     }
   };
 
-  useEffect(() => {
-    if (activeView !== "evaluation") return;
-    setIsLoadingRuns(true);
-    setEvaluationError(null);
-    fetchEvaluationRuns()
-      .then(setEvaluationRuns)
-      .catch((err) => setEvaluationError(err instanceof Error ? err.message : "Failed to load runs"))
-      .finally(() => setIsLoadingRuns(false));
-  }, [activeView]);
-
-  useEffect(() => {
-    if (selectedRunId == null) {
-      setEvaluationRunDetail(null);
-      return;
-    }
-    setIsLoadingRunDetail(true);
-    setEvaluationError(null);
-    fetchEvaluationRunDetail(selectedRunId)
-      .then(setEvaluationRunDetail)
-      .catch((err) => setEvaluationError(err instanceof Error ? err.message : "Failed to load run detail"))
-      .finally(() => setIsLoadingRunDetail(false));
-  }, [selectedRunId]);
-
   const currentStatus = state.statusDetails?.status ?? state.status ?? "";
   const timelineStagesWithState = TIMELINE_STAGES.map((stage) => ({
     ...stage,
@@ -528,172 +532,193 @@ export function App() {
   }));
 
   return (
-    <div className="app-root">
-      <header className="app-header">
-        <h1>Self-Correcting Multi-Agent AI</h1>
-        <p>
-          Ask a question for a baseline answer, or run the full pipeline (Planner → Generator → Claims → Retrieval → Verification → Critic → Refiner) and inspect the transparency dashboard.
+    <div className="max-w-4xl mx-auto px-6 py-8 min-h-screen">
+      <header className="mb-10 pb-8 border-b border-slate-800/80 flex flex-col items-start">
+  
+
+        {/* Main Title with Gradient */}
+        <h1 className="m-0 mb-4 text-2xl sm:text-4xl font-extrabold tracking-tight text-slate-100 leading-tight">
+          Self-Correcting{' '}
+          <span className="text-transparent bg-clip-text bg-gradient-to-r from-sky-400 via-indigo-400 to-purple-400">
+            Multi-Agent AI
+          </span>
+        </h1>
+
+        {/* Description */}
+        <p className="m-0 text-slate-400 text-sm sm:text-base leading-relaxed max-w-[54ch]">
+          Ask a question for a baseline answer, or run the full pipeline and inspect claims, evidence, and the refinement timeline.
         </p>
-        <nav className="app-nav" aria-label="Main">
-          <button
-            type="button"
-            className={`nav-tab ${activeView === "query" ? "active" : ""}`}
-            onClick={() => setActiveView("query")}
-          >
-            Query
-          </button>
-          <button
-            type="button"
-            className={`nav-tab ${activeView === "evaluation" ? "active" : ""}`}
-            onClick={() => setActiveView("evaluation")}
-          >
-            Evaluation
-          </button>
-        </nav>
+        
       </header>
 
-      <main className="app-main">
-        {activeView === "evaluation" ? (
-          <EvaluationView
-            runs={evaluationRuns}
-            runDetail={evaluationRunDetail}
-            selectedRunId={selectedRunId}
-            onSelectRun={setSelectedRunId}
-            isLoadingRuns={isLoadingRuns}
-            isLoadingRunDetail={isLoadingRunDetail}
-            error={evaluationError}
-          />
-        ) : (
-          <>
-        <section className="card">
-          <h2>Ask a Question</h2>
-          <form onSubmit={handleSubmit} className="query-form">
-            <label htmlFor="query-input">Your question</label>
+      <main id="main-content" className="grid gap-6" aria-label="Main content">
+        <section className="bg-[#0c1222] rounded-xl p-6 border border-slate-800 shadow-lg">
+          <h2 className="m-0 mb-4 text-lg font-semibold text-slate-100 flex items-center gap-2 before:content-[''] before:w-1 before:h-5 before:rounded before:bg-gradient-to-b before:from-indigo-500 before:to-cyan-500">
+            Ask a Question
+          </h2>
+          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+            <label htmlFor="query-input" className="block font-medium text-sm text-slate-100">
+              Your question
+            </label>
             <textarea
               id="query-input"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Example: Explain why TCP performs poorly in wireless networks and compare it with QUIC."
               rows={5}
+              className="block w-full min-h-[7rem] resize-y px-4 py-3 rounded-md border border-slate-600 bg-slate-900 text-slate-100 text-base font-sans leading-normal placeholder:text-slate-500 hover:border-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-colors"
             />
-            <div className="query-actions">
-              <button type="submit" disabled={isSubmitting}>
-                {isSubmitting ? "Submitting..." : "Submit (baseline)"}
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="submit"
+                className="px-4 py-2 rounded-md font-medium text-white bg-gradient-to-br from-indigo-500 to-cyan-500 hover:from-indigo-600 hover:to-cyan-600 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-900 disabled:opacity-60 disabled:cursor-not-allowed transition-all"
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? "Running..." : "Quick Run"}
               </button>
               <button
                 type="button"
-                className="secondary-button"
+                className="px-4 py-2 rounded-md font-medium text-slate-200 bg-transparent border border-slate-600 hover:border-slate-500 hover:bg-slate-800/50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-900 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
                 onClick={handleStartAsyncWorkflow}
                 disabled={isStartingAsync}
               >
-                {isStartingAsync ? "Starting..." : "Run full pipeline (async)"}
+                {isStartingAsync ? "Starting..." : "Full Run"}
               </button>
             </div>
           </form>
-          {error && <p className="error-message">{error}</p>}
-        </section>
-
-        <section className="card">
-          <h2>Answer</h2>
-          {state.answer ? (
-            <div className="answer-block">
-              <p>{state.answer}</p>
-            </div>
-          ) : state.workflowId && currentStatus === "REFINED" ? (
-            responses ? (
-              <div className="answer-block">
-                <p>
-                  {responses.find((r) => r.agent_type === "REFINER")?.response_text ?? "Refined answer not available yet."}
-                </p>
-              </div>
-            ) : (
-              <p className="placeholder">
-                Waiting for refined answer to be generated...
-              </p>
-            )
-          ) : (
-            <p className="placeholder">
-              Submit a question (baseline) or run full pipeline and load responses to see the answer.
+          {error && (
+            <p className="mt-3 px-3 py-2 rounded-md bg-red-500/15 text-red-300 text-sm" role="alert">
+              {error}
             </p>
           )}
         </section>
 
-        <section className="card">
-          <h2>Workflow status &amp; timeline</h2>
+        <section className="bg-[#0c1222] rounded-xl p-6 border border-slate-800 shadow-lg">
+          <h2 className="m-0 mb-4 text-lg font-semibold text-slate-100 flex items-center gap-2 before:content-[''] before:w-1 before:h-5 before:rounded before:bg-gradient-to-b before:from-indigo-500 before:to-cyan-500">
+            Answer
+          </h2>
+          {state.answer ? (
+            <div className="rounded-md bg-slate-800/50 p-4 border border-slate-700/50">
+              <p className="m-0 text-slate-200 leading-relaxed">{formatResponseText(state.answer)}</p>
+            </div>
+          ) : state.workflowId && currentStatus === "REFINED" ? (
+            responses ? (
+              <div className="rounded-md bg-slate-800/50 p-4 border border-slate-700/50">
+                <p className="m-0 text-slate-200 leading-relaxed">
+                  {formatResponseText(responses.find((r) => r.agent_type === "REFINER")?.response_text ?? "Refined answer not available yet.")}
+                </p>
+              </div>
+            ) : (
+              <p className="text-slate-500 text-sm italic">
+                Waiting for refined answer to be generated...
+              </p>
+            )
+          ) : (
+            <p className="text-slate-500 text-sm italic">
+              Submit a question for a quick answer, or run the full pipeline to see a verified, refined answer here.
+            </p>
+          )}
+        </section>
+
+        <section className="bg-[#0c1222] rounded-xl p-6 border border-slate-800 shadow-lg">
+          <h2 className="m-0 mb-4 text-lg font-semibold text-slate-100 flex items-center gap-2 before:content-[''] before:w-1 before:h-5 before:rounded before:bg-gradient-to-b before:from-indigo-500 before:to-cyan-500">
+            Workflow status &amp; timeline
+          </h2>
           {state.workflowId ? (
             <>
-              <p><strong>Workflow ID:</strong> {state.workflowId}</p>
-              <p>
-                <strong>Current status:</strong>{" "}
-                <span className={`status-badge status-${(currentStatus || "unknown").toLowerCase()}`}>
-                  {currentStatus || "N/A"}
-                </span>
-                {pollingIntervalRef.current !== null && !TERMINAL_STATES.includes(currentStatus) && (
-                  <span style={{ marginLeft: "0.5rem", fontSize: "0.875rem", color: "#28a745" }}>
-                    ● Auto-updating
+              <div className="flex flex-wrap gap-4 mb-4">
+                <p className="m-0 text-slate-300 text-sm"><strong className="text-slate-200">Workflow ID</strong> {state.workflowId}</p>
+                <p className="m-0 text-slate-300 text-sm flex items-center gap-2 flex-wrap">
+                  <strong className="text-slate-200">Status</strong>{" "}
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getStatusBadgeClass(currentStatus || "unknown")}`}>
+                    {currentStatus || "N/A"}
                   </span>
-                )}
-              </p>
+                  {pollingIntervalRef.current !== null && !TERMINAL_STATES.includes(currentStatus) && (
+                    <span className="text-cyan-400/90 text-xs" aria-live="polite">Auto-updating</span>
+                  )}
+                </p>
+              </div>
               {state.statusDetails?.error_message && (
-                <div className="error-message" style={{ marginTop: "0.5rem", padding: "0.75rem", backgroundColor: "#fff3cd", border: "1px solid #ffc107", borderRadius: "4px" }}>
+                <div className="mb-4 px-3 py-2 rounded-md bg-red-500/15 text-red-300 text-sm" role="alert">
                   <strong>Error:</strong> {state.statusDetails.error_message}
                 </div>
               )}
-              <div className="status-actions">
-                <button type="button" onClick={handleCheckStatus} disabled={isCheckingStatus}>
+              <div className="flex flex-wrap gap-2 mb-4">
+                <button
+                  type="button"
+                  className="px-3 py-1.5 rounded text-sm font-medium text-slate-200 border border-slate-600 hover:border-slate-500 hover:bg-slate-800/50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-900 disabled:opacity-60 disabled:cursor-not-allowed"
+                  onClick={handleCheckStatus}
+                  disabled={isCheckingStatus}
+                >
                   {isCheckingStatus ? "Checking..." : "Refresh status"}
                 </button>
-                <button type="button" onClick={handleLoadResponses} disabled={isLoadingResponses}>
+                <button
+                  type="button"
+                  className="px-3 py-1.5 rounded text-sm font-medium text-slate-200 border border-slate-600 hover:border-slate-500 hover:bg-slate-800/50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-900 disabled:opacity-60 disabled:cursor-not-allowed"
+                  onClick={handleLoadResponses}
+                  disabled={isLoadingResponses}
+                >
                   {isLoadingResponses ? "Loading..." : "Load stored responses"}
                 </button>
-                <button type="button" onClick={handleLoadClaims} disabled={isLoadingClaims}>
+                <button
+                  type="button"
+                  className="px-3 py-1.5 rounded text-sm font-medium text-slate-200 border border-slate-600 hover:border-slate-500 hover:bg-slate-800/50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-900 disabled:opacity-60 disabled:cursor-not-allowed"
+                  onClick={handleLoadClaims}
+                  disabled={isLoadingClaims}
+                >
                   {isLoadingClaims ? "Loading..." : "Load claims"}
                 </button>
               </div>
               {pollingIntervalRef.current !== null && !TERMINAL_STATES.includes(currentStatus) && (
-                <p style={{ marginTop: "0.5rem", fontSize: "0.875rem", color: "#6c757d", fontStyle: "italic" }}>
+                <p className="text-slate-500 text-xs italic mb-4">
                   Timeline and data are automatically updating every 2 seconds
                 </p>
               )}
               {state.statusDetails && (
-                <div className="status-details">
-                  <p><strong>Created at:</strong> {new Date(state.statusDetails.created_at).toLocaleString()}</p>
-                  <p><strong>Completed at:</strong> {state.statusDetails.completed_at ? new Date(state.statusDetails.completed_at).toLocaleString() : "—"}</p>
+                <div className="mb-4 space-y-1 text-slate-400 text-sm">
+                  <p className="m-0"><strong className="text-slate-300">Created at:</strong> {new Date(state.statusDetails.created_at).toLocaleString()}</p>
+                  <p className="m-0"><strong className="text-slate-300">Completed at:</strong> {state.statusDetails.completed_at ? new Date(state.statusDetails.completed_at).toLocaleString() : "—"}</p>
                 </div>
               )}
 
-              <div className="timeline-section">
-                <h3>Pipeline timeline</h3>
-                <ul className="timeline-list">
+              <div className="mb-6">
+                <h3 className="mt-4 mb-2 text-base font-semibold text-slate-100">Pipeline timeline</h3>
+                <ul className="list-none m-0 p-0 space-y-0" role="list">
                   {timelineStagesWithState.map((stage) => (
                     <li
                       key={stage.key}
-                      className={`timeline-item ${stage.completed ? "completed" : "pending"} ${stage.failed && !stage.completed ? "failed" : ""}`}
+                      className={`flex items-center gap-3 py-2 border-b border-slate-800 last:border-b-0 ${stage.completed ? "text-slate-200" : "text-slate-500"} ${stage.failed && !stage.completed ? "text-red-400" : ""}`}
                     >
-                      <span className="timeline-marker" aria-hidden />
-                      <span className="timeline-label">{stage.label}</span>
-                      {stage.timestamp && <span className="timeline-time">{stage.timestamp}</span>}
-                      {!stage.timestamp && stage.completed && <span className="timeline-time">—</span>}
+                      <span
+                        className={`shrink-0 w-2 h-2 rounded-full ${stage.completed ? (stage.failed ? "bg-red-500" : "bg-emerald-500") : "bg-slate-600"}`}
+                        aria-hidden="true"
+                      />
+                      <span className="font-medium text-sm">{stage.label}</span>
+                      {(stage.timestamp || (stage.completed && !stage.timestamp)) && (
+                        <span className="ml-auto text-xs text-slate-500 tabular-nums">
+                          {stage.timestamp ?? "—"}
+                        </span>
+                      )}
                     </li>
                   ))}
                 </ul>
               </div>
 
               {responses && (
-                <div className="responses-list">
-                  <h3>Stored responses</h3>
+                <div className="mb-6">
+                  <h3 className="mt-4 mb-2 text-base font-semibold text-slate-100">Stored responses</h3>
                   {responses.length === 0 ? (
-                    <p className="placeholder">No stored responses for this workflow yet.</p>
+                    <p className="text-slate-500 text-sm italic m-0">No stored responses for this workflow yet.</p>
                   ) : (
-                    <ul>
+                    <ul className="list-none m-0 p-0 space-y-4">
                       {responses.map((item) => (
-                        <li key={item.id}>
-                          <div className="response-meta">
-                            <span className="badge">{item.agent_type}</span>
+                        <li key={item.id} className="rounded-md bg-slate-800/40 p-3 border border-slate-700/50">
+                          <div className="flex flex-wrap items-center gap-2 mb-2 text-sm text-slate-400">
+                            <span className="px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 text-xs font-medium">{item.agent_type}</span>
                             <span>{new Date(item.timestamp).toLocaleString()}</span>
-                            {item.model_used && <span className="model-used">Model: {item.model_used}</span>}
+                            {item.model_used && <span className="text-slate-500">Model: {item.model_used}</span>}
                           </div>
-                          <div className="response-text">{item.response_text}</div>
+                          <div className="text-slate-200 text-sm leading-relaxed whitespace-pre-wrap">{formatResponseText(item.response_text)}</div>
                         </li>
                       ))}
                     </ul>
@@ -702,54 +727,57 @@ export function App() {
               )}
 
               {claims && (
-                <div className="claims-list">
-                  <h3>Claim-level explanation</h3>
-                  <p className="claims-hint">Click a claim to expand evidence and verification score.</p>
+                <div className="mb-6">
+                  <h3 className="mt-4 mb-2 text-base font-semibold text-slate-100">Claim-level explanation</h3>
+                  <p className="text-slate-500 text-xs mb-3 m-0">Click a claim to expand evidence and verification score.</p>
                   {claims.length === 0 ? (
-                    <p className="placeholder">No claims extracted yet. Run the async pipeline and load claims after CLAIMS_EXTRACTED.</p>
+                    <p className="text-slate-500 text-sm italic m-0">No claims extracted yet. Run the async pipeline and load claims after CLAIMS_EXTRACTED.</p>
                   ) : (
-                    <ul>
+                    <ul className="list-none m-0 p-0 space-y-3">
                       {claims.map((c) => {
                         const evidence = evidenceByClaim[c.id] ?? [];
                         const isExpanded = expandedClaimId === c.id;
-                        const statusClass = getVerificationStatusClass(c.verification_status);
+                        const borderClass = getVerificationStatusBorderClass(c.verification_status);
+                        const badgeClass = getVerificationStatusBadgeClass(c.verification_status);
                         return (
-                          <li key={c.id} className={`claim-item ${statusClass}`}>
+                          <li key={c.id} className={`rounded-md border-l-4 ${borderClass} bg-slate-800/30 pl-3 pr-3 py-2`}>
                             <button
                               type="button"
-                              className="claim-row"
+                              className="w-full text-left flex flex-wrap items-center gap-2 py-1 rounded focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-900"
                               onClick={() => handleToggleClaimExpand(c.id)}
                               aria-expanded={isExpanded}
+                              aria-controls={`claim-evidence-${c.id}`}
+                              id={`claim-toggle-${c.id}`}
                             >
-                              <span className="claim-text">{c.claim_text}</span>
-                              <span className={`claim-status-badge ${statusClass}`}>
+                              <span className="flex-1 min-w-0 text-slate-200 text-sm font-medium">{c.claim_text}</span>
+                              <span className={`shrink-0 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${badgeClass}`}>
                                 {c.verification_status ?? "—"}
                               </span>
                               {c.verification_confidence != null && (
-                                <span className="claim-verification-score">
+                                <span className="shrink-0 text-slate-500 text-xs tabular-nums">
                                   {(c.verification_confidence * 100).toFixed(0)}%
                                 </span>
                               )}
                             </button>
                             {c.entities.length > 0 && (
-                              <div className="claim-entities">{c.entities.join(" · ")}</div>
+                              <div className="text-slate-500 text-xs mt-1">{c.entities.join(" · ")}</div>
                             )}
                             {c.extraction_confidence != null && (
-                              <div className="claim-confidence">Extraction confidence: {(c.extraction_confidence * 100).toFixed(0)}%</div>
+                              <div className="text-slate-500 text-xs mt-0.5">Extraction confidence: {(c.extraction_confidence * 100).toFixed(0)}%</div>
                             )}
                             {isExpanded && (
-                              <div className="claim-evidence-block">
+                              <div className="mt-3 pt-3 border-t border-slate-700/50" id={`claim-evidence-${c.id}`} aria-labelledby={`claim-toggle-${c.id}`}>
                                 {evidence.length === 0 ? (
-                                  <p className="placeholder">Loading evidence…</p>
+                                  <p className="text-slate-500 text-sm italic m-0">Loading evidence…</p>
                                 ) : (
-                                  <ul className="evidence-list">
+                                  <ul className="list-none m-0 p-0 space-y-3">
                                     {evidence.map((e) => (
-                                      <li key={e.id}>
-                                        <div className="evidence-snippet">{e.snippet}</div>
-                                        <div className="evidence-meta">
-                                          {e.is_external && <span className="evidence-badge external">External</span>}
-                                          {e.source_url && <span className="evidence-source">{e.source_url}</span>}
-                                          {e.retrieval_score != null && <span className="evidence-score">score: {e.retrieval_score.toFixed(2)}</span>}
+                                      <li key={e.id} className="rounded-md bg-slate-800/50 p-3 border border-slate-700/50">
+                                        <div className="text-slate-200 text-sm leading-relaxed mb-2">{formatResponseText(e.snippet)}</div>
+                                        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                                          {e.is_external && <span className="px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 font-medium">External</span>}
+                                          {e.source_url && <span className="truncate max-w-full" title={e.source_url}>{e.source_url}</span>}
+                                          {e.retrieval_score != null && <span>score: {e.retrieval_score.toFixed(2)}</span>}
                                         </div>
                                       </li>
                                     ))}
@@ -765,39 +793,44 @@ export function App() {
                 </div>
               )}
 
-              <div className="developer-section">
-                <h3>Developer / debug</h3>
-                <label className="toggle-label">
+              <div className="mt-6 pt-4 border-t border-slate-800">
+                <h3 className="mt-0 mb-3 text-base font-semibold text-slate-100">Developer / debug</h3>
+                <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer mb-3">
                   <input
                     type="checkbox"
                     checked={developerMode}
                     onChange={(e) => setDeveloperMode(e.target.checked)}
+                    className="rounded border-slate-600 bg-slate-800 text-indigo-500 focus:ring-indigo-500"
                   />
                   Developer mode
                 </label>
                 <button
                   type="button"
-                  className="small-button"
+                  className="px-3 py-1.5 rounded text-sm font-medium text-slate-200 border border-slate-600 hover:border-slate-500 hover:bg-slate-800/50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-900 disabled:opacity-60 disabled:cursor-not-allowed"
                   onClick={handleLoadDebug}
                   disabled={isLoadingDebug}
                 >
                   {isLoadingDebug ? "Loading…" : "Load raw JSON"}
                 </button>
                 {developerMode && debugPayload && (
-                  <div className="debug-views">
-                    <div className="debug-tabs">
+                  <div className="mt-4">
+                    <div className="flex flex-wrap gap-1 mb-2">
                       {(["workflow", "responses", "claims", "verifications"] as const).map((tab) => (
                         <button
                           key={tab}
                           type="button"
-                          className={`debug-tab ${debugTab === tab ? "active" : ""}`}
+                          className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+                            debugTab === tab
+                              ? "bg-indigo-500/30 text-indigo-200 border border-indigo-500/50"
+                              : "bg-slate-800/50 text-slate-400 border border-slate-700 hover:bg-slate-700/50 hover:text-slate-300"
+                          }`}
                           onClick={() => setDebugTab(tab)}
                         >
                           {tab}
                         </button>
                       ))}
                     </div>
-                    <pre className="debug-json">
+                    <pre className="m-0 p-4 rounded-md bg-slate-900 border border-slate-700 text-slate-300 text-xs overflow-auto max-h-80 font-mono">
                       {debugTab === "workflow" && JSON.stringify(debugPayload.workflow, null, 2)}
                       {debugTab === "responses" && JSON.stringify(debugPayload.responses, null, 2)}
                       {debugTab === "claims" && JSON.stringify(debugPayload.claims, null, 2)}
@@ -808,166 +841,10 @@ export function App() {
               </div>
             </>
           ) : (
-            <p className="placeholder">Submit a question or run the full pipeline to see workflow and timeline.</p>
+            <p className="text-slate-500 text-sm italic m-0">Run the full pipeline to see workflow status, timeline, and claim-level evidence here.</p>
           )}
         </section>
-          </>
-        )}
       </main>
     </div>
-  );
-}
-
-function EvaluationView({
-  runs,
-  runDetail,
-  selectedRunId,
-  onSelectRun,
-  isLoadingRuns,
-  isLoadingRunDetail,
-  error,
-}: {
-  runs: EvaluationRunSummary[] | null;
-  runDetail: EvaluationRunDetail | null;
-  selectedRunId: number | null;
-  onSelectRun: (id: number | null) => void;
-  isLoadingRuns: boolean;
-  isLoadingRunDetail: boolean;
-  error: string | null;
-}) {
-  const m = runDetail?.summary_metrics;
-  return (
-    <>
-      <section className="card">
-        <h2>Evaluation runs</h2>
-        {error && <p className="error-message">{error}</p>}
-        {isLoadingRuns ? (
-          <p className="placeholder">Loading runs…</p>
-        ) : !runs?.length ? (
-          <p className="placeholder">No evaluation runs yet. Run the script: <code>python scripts/run_evaluation.py --dataset data/eval_questions.json --mode both</code></p>
-        ) : (
-          <ul className="evaluation-runs-list">
-            {runs.map((r) => (
-              <li key={r.id}>
-                <button
-                  type="button"
-                  className={`evaluation-run-item ${selectedRunId === r.id ? "selected" : ""}`}
-                  onClick={() => onSelectRun(selectedRunId === r.id ? null : r.id)}
-                >
-                  <span className="run-id">Run #{r.id}</span>
-                  {r.name && <span className="run-name">{r.name}</span>}
-                  <span className="run-mode">{r.mode}</span>
-                  <span className={`run-status run-status-${r.status}`}>{r.status}</span>
-                  <span className="run-date">{new Date(r.created_at).toLocaleString()}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-      {selectedRunId != null && (
-        <section className="card">
-          <h2>Run summary</h2>
-          {isLoadingRunDetail ? (
-            <p className="placeholder">Loading run detail…</p>
-          ) : runDetail ? (
-            <>
-              <div className="eval-metrics-grid">
-                {m && (
-                  <>
-                    <div className="metric-card">
-                      <span className="metric-label">Questions</span>
-                      <span className="metric-value">{Number(m.num_questions) ?? 0}</span>
-                    </div>
-                    <div className="metric-card">
-                      <span className="metric-label">Baseline success</span>
-                      <span className="metric-value">{Number(m.num_baseline_success) ?? 0}</span>
-                    </div>
-                    <div className="metric-card">
-                      <span className="metric-label">System success</span>
-                      <span className="metric-value">{Number(m.num_system_success) ?? 0}</span>
-                    </div>
-                    <div className="metric-card">
-                      <span className="metric-label">Claim verification accuracy</span>
-                      <span className="metric-value">{typeof m.avg_claim_verification_accuracy === "number" ? `${(m.avg_claim_verification_accuracy * 100).toFixed(1)}%` : "—"}</span>
-                    </div>
-                    <div className="metric-card">
-                      <span className="metric-label">F1 (verification)</span>
-                      <span className="metric-value">{typeof m.f1 === "number" ? m.f1.toFixed(3) : "—"}</span>
-                    </div>
-                  </>
-                )}
-              </div>
-              {m && (Number(m.num_questions) ?? 0) > 0 && (
-                <div className="eval-bars">
-                  <div className="eval-bar-row">
-                    <span className="eval-bar-label">Baseline success rate</span>
-                    <div className="eval-bar-track">
-                      <div
-                        className="eval-bar-fill baseline"
-                        style={{ width: `${((Number(m.num_baseline_success) ?? 0) / (Number(m.num_questions) ?? 1)) * 100}%` }}
-                      />
-                    </div>
-                    <span className="eval-bar-pct">{((Number(m.num_baseline_success) ?? 0) / (Number(m.num_questions) ?? 1) * 100).toFixed(0)}%</span>
-                  </div>
-                  <div className="eval-bar-row">
-                    <span className="eval-bar-label">System success rate</span>
-                    <div className="eval-bar-track">
-                      <div
-                        className="eval-bar-fill system"
-                        style={{ width: `${((Number(m.num_system_success) ?? 0) / (Number(m.num_questions) ?? 1)) * 100}%` }}
-                      />
-                    </div>
-                    <span className="eval-bar-pct">{((Number(m.num_system_success) ?? 0) / (Number(m.num_questions) ?? 1) * 100).toFixed(0)}%</span>
-                  </div>
-                  {typeof m.avg_claim_verification_accuracy === "number" && (
-                    <div className="eval-bar-row">
-                      <span className="eval-bar-label">Claim verification accuracy</span>
-                      <div className="eval-bar-track">
-                        <div
-                          className="eval-bar-fill accuracy"
-                          style={{ width: `${m.avg_claim_verification_accuracy * 100}%` }}
-                        />
-                      </div>
-                      <span className="eval-bar-pct">{(m.avg_claim_verification_accuracy * 100).toFixed(0)}%</span>
-                    </div>
-                  )}
-                </div>
-              )}
-              <h3>Samples</h3>
-              <div className="eval-samples-table-wrap">
-                <table className="eval-samples-table">
-                  <thead>
-                    <tr>
-                      <th>#</th>
-                      <th>Question</th>
-                      <th>Baseline</th>
-                      <th>System</th>
-                      <th>Claims / Supported</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {runDetail.samples.map((s, idx) => {
-                      const sm = s.metrics || {};
-                      const numClaims = Number(sm.num_claims) ?? 0;
-                      const numSupported = Number(sm.num_supported) ?? 0;
-                      return (
-                        <tr key={s.id}>
-                          <td>{idx + 1}</td>
-                          <td className="cell-question">{s.question}</td>
-                          <td>{s.baseline_status ?? "—"}</td>
-                          <td>{s.system_status ?? "—"}</td>
-                          <td>{numClaims > 0 ? `${numSupported}/${numClaims}` : "—"}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          ) : null}
-        </section>
-      )}
-    </>
   );
 }

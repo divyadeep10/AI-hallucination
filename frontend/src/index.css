@@ -1,0 +1,25 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    @apply scroll-smooth;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      @apply scroll-auto;
+    }
+  }
+  body {
+    @apply m-0 bg-surface text-slate-100 font-sans text-base leading-normal antialiased;
+  }
+}
+
+/* Skip link: off-screen until focused */
+.skip-link {
+  @apply absolute top-2 left-4 px-4 py-2 bg-indigo-500 text-white font-semibold rounded-md no-underline z-[100] -translate-y-[120%] transition-transform duration-150 ease-out;
+}
+.skip-link:focus {
+  @apply translate-y-0 outline-2 outline-offset-2 outline-indigo-500;
+}

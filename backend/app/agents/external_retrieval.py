@@ -1,13 +1,13 @@
 """
-External Retrieval Agent: when no evidence is found from internal retrieval,
-run web search (Playwright), scrape top N pages, chunk, re-verify with NLI, store as external evidence.
-Controlled by EXTERNAL_RETRIEVAL_ENABLED in .env (enable/disable).
+External Retrieval Agent: permanent second retrieval layer.
+Always runs after internal retrieval and verification: fetches evidence via Playwright
+(web search), chunks and verifies with NLI, stores as external evidence. Internal and
+external evidence are combined; Critic/Refiner see both. Set EXTERNAL_RETRIEVAL_ENABLED=false to disable.
 """
 import asyncio
 import traceback
 from typing import Any
 
-from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.agents.base import Agent
@@ -28,11 +28,11 @@ def _chunk_relevant_to_claim(chunk_snippet: str, claim_text: str) -> bool:
 
 class ExternalRetrievalAgent(Agent):
     """
-    Runs after Verification. When no evidence was found from internal retrieval
-    (i.e. no Evidence rows with is_external=False for this workflow's claims),
-    runs external web search (Playwright), scrapes top N pages, chunks text,
-    re-verifies claims with NLI, and stores Evidence + Verification with is_external=True.
-    Set EXTERNAL_RETRIEVAL_ENABLED=false in .env to disable this layer entirely.
+    Permanent second retrieval layer. Runs after Verification: always runs web search
+    (Playwright), scrapes top N pages, chunks text, re-verifies claims with NLI, and
+    stores Evidence + Verification with is_external=True. Internal evidence (layer 1)
+    and external evidence (layer 2) are combined; Critic and Refiner see both.
+    Set EXTERNAL_RETRIEVAL_ENABLED=false in .env to disable this layer.
     """
 
     def __init__(self) -> None:
@@ -61,26 +61,14 @@ class ExternalRetrievalAgent(Agent):
             )
             if not claims:
                 return
-            claim_ids = {c.id for c in claims}
 
-            # Run Playwright only when no internal evidence was found
-            internal_evidence_count = (
-                db.query(Evidence)
-                .filter(
-                    Evidence.claim_id.in_(claim_ids),
-                    or_(Evidence.is_external == False, Evidence.is_external.is_(None)),
-                )
-                .count()
-            )
-            if internal_evidence_count > 0:
-                print(f"[AGENT] ExternalRetrievalAgent: internal evidence found ({internal_evidence_count} rows), skipping web search")
-                return
-
-            print(f"[AGENT] ExternalRetrievalAgent: no internal evidence, running web search (Playwright)")
-            external_items = run_external_pipeline(workflow.user_query or "")
+            print(f"[AGENT] ExternalRetrievalAgent: running web search (Playwright), second layer")
+            query = (workflow.user_query or "").strip()
+            external_items = run_external_pipeline(query)
             if not external_items:
-                print(f"[AGENT] ExternalRetrievalAgent: no external evidence returned")
+                print(f"[AGENT] ExternalRetrievalAgent: Playwright returned no evidence (check worker logs for [EXTERNAL_RETRIEVAL] messages; Google may block or selectors may need update)")
                 return
+            print(f"[AGENT] ExternalRetrievalAgent: got {len(external_items)} external chunks, verifying claims")
 
             for claim in claims:
                 relevant = [
