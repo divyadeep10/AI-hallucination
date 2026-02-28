@@ -3,6 +3,7 @@ from .generator import GeneratorAgent, run_generator_agent
 from .claim_extractor import ClaimExtractionAgent, run_claim_extractor_agent
 from .retriever import RetrieverAgent, run_retriever_agent
 from .verification import VerificationAgent, run_verification_agent
+from .external_retrieval import ExternalRetrievalAgent, run_external_retrieval_agent
 from .critic import CriticAgent, run_critic_agent
 from .refiner import RefinementAgent, run_refiner_agent
 
@@ -17,6 +18,8 @@ __all__ = [
     "run_retriever_agent",
     "VerificationAgent",
     "run_verification_agent",
+    "ExternalRetrievalAgent",
+    "run_external_retrieval_agent",
     "CriticAgent",
     "run_critic_agent",
     "RefinementAgent",

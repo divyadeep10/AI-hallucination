@@ -10,3 +10,4 @@ httpx
 sentence-transformers
 torch
 rank-bm25
+playwright

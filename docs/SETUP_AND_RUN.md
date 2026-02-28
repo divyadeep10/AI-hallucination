@@ -68,6 +68,10 @@ Optional:
 
 Configuration is centralized in `backend/app/config.py`; env vars are documented in `.env.example`.
 
+### 3.3 External retrieval (second retrieval layer)
+
+When internal retrieval yields fewer than 40% supported claims, the pipeline can run a web search (Playwright) and re-verify. See **[docs/EXTERNAL_RETRIEVAL.md](EXTERNAL_RETRIEVAL.md)** for details. Optional env vars: `EXTERNAL_RETRIEVAL_ENABLED` (enable/disable; when true, runs only when no internal evidence), `EXTERNAL_TOP_N_PAGES`, `PLAYWRIGHT_*`, and optionally `EXTERNAL_PLAYWRIGHT_PROXY` for IP rotation. After installing Python deps, run `playwright install chromium`.
+
 ---
 
 ## 4. Run locally (without Docker)
@@ -88,6 +92,9 @@ From the project root:
 ```bash
 # Install Python dependencies (recommended: use a virtualenv)
 pip install -r requirements.txt
+
+# Optional: for external retrieval (web search when internal evidence is low)
+playwright install chromium
 
 # Run migrations (from backend directory, with backend on PYTHONPATH)
 cd backend

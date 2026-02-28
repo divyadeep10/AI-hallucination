@@ -15,6 +15,7 @@ from app.agents import (
     run_claim_extractor_agent,
     run_retriever_agent,
     run_verification_agent,
+    run_external_retrieval_agent,
     run_critic_agent,
     run_refiner_agent,
 )
@@ -121,6 +122,7 @@ def create_workflow_async(
         queue.enqueue(run_claim_extractor_agent, workflow.id)
         queue.enqueue(run_retriever_agent, workflow.id)
         queue.enqueue(run_verification_agent, workflow.id)
+        queue.enqueue(run_external_retrieval_agent, workflow.id)
         queue.enqueue(run_critic_agent, workflow.id)
         queue.enqueue(run_refiner_agent, workflow.id)
     except Exception as exc:
@@ -389,6 +391,7 @@ def get_workflow_debug(
                 source_url=e.source_url,
                 snippet=e.snippet,
                 retrieval_score=e.retrieval_score,
+                is_external=getattr(e, "is_external", False),
             )
             for e in evidence_items
         ],
@@ -437,6 +440,7 @@ def list_claim_evidence(
             source_url=e.source_url,
             snippet=e.snippet,
             retrieval_score=e.retrieval_score,
+            is_external=getattr(e, "is_external", False),
         )
         for e in evidence_items
     ]

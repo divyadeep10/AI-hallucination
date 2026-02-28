@@ -112,3 +112,11 @@ Phase 9 – Packaging, Deployment, and Polish [IMPLEMENTED]
 - Central config in backend/app/config.py; db and queue use config; .env.example documents all vars and how to switch OpenAI vs Gemini.
 9.3 – Documentation & Final Report Hooks
 - docs/SETUP_AND_RUN.md: full setup, install commands, run locally/Docker, evaluation script, troubleshooting; README: architecture/methodology mapping (pipeline, claim extraction, verification, evaluation); link to setup guide.
+
+External Retrieval Layer (Second Retrieval) [IMPLEMENTED]
+- Trigger: when **no evidence** is found from internal retrieval (after Verification), run external web search. Controlled by `EXTERNAL_RETRIEVAL_ENABLED` in .env (set to false to disable).
+- Implementation: `backend/app/external_retrieval/` package: config, Playwright search (human-like delays, UA, viewport, anti-detection), scraper (text extraction), chunker, pipeline (search → scrape top N pages → chunk → evidence list).
+- Playwright best practices: random delays (PLAYWRIGHT_DELAY_MIN/MAX), per-char typing delay, real Chrome UA and viewport, `--disable-blink-features=AutomationControlled`, single browser session for search + scrape.
+- Agent: `ExternalRetrievalAgent` runs after Verification; if `EXTERNAL_RETRIEVAL_ENABLED` is false, skips; else counts internal evidence (Evidence with is_external=False); if none, runs `run_external_pipeline(user_query)`; for each claim matches relevant chunks, runs same NLI, stores Evidence (is_external=True) and Verification rows.
+- Evidence model: added `is_external` (boolean); API and frontend show "External" badge for external evidence.
+- Queue: verification → external_retrieval → critic → refiner. Install: `playwright install chromium`.

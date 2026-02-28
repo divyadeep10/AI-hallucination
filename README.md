@@ -12,7 +12,7 @@ Current Status (Through Phase 9 – Product ready)
 -----------------------------------------------
 
 - **Phases 0–9** implemented. The system is runnable locally or via Docker.
-- **Backend** (`backend/`): FastAPI, PostgreSQL (Alembic), Redis/RQ, LLM (OpenAI or Gemini), agents (Planner → Generator → Claim Extractor → Retriever → Verifier → Critic → Refiner), evaluation API and metrics.
+- **Backend** (`backend/`): FastAPI, PostgreSQL (Alembic), Redis/RQ, LLM (OpenAI or Gemini), agents (Planner → Generator → Claim Extractor → Retriever → Verifier → **External Retrieval** → Critic → Refiner), evaluation API and metrics. When no internal evidence is found, external web search (Playwright) can run; enable/disable with `EXTERNAL_RETRIEVAL_ENABLED` in .env. See [docs/EXTERNAL_RETRIEVAL.md](docs/EXTERNAL_RETRIEVAL.md).
 - **Frontend** (`frontend/`): React + Vite dashboard (Query, workflow timeline, claims/evidence, developer debug, Evaluation tab).
 - **Config**: Centralized in `backend/app/config.py`; copy `.env.example` to `.env` and set `DATABASE_URL`, `REDIS_URL`, and at least one LLM key.
 - **Docker**: `docker-compose.yml` plus Dockerfiles for backend, worker, and frontend (see [Setup and run](#setup-and-run)).

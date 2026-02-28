@@ -747,6 +747,7 @@ export function App() {
                                       <li key={e.id}>
                                         <div className="evidence-snippet">{e.snippet}</div>
                                         <div className="evidence-meta">
+                                          {e.is_external && <span className="evidence-badge external">External</span>}
                                           {e.source_url && <span className="evidence-source">{e.source_url}</span>}
                                           {e.retrieval_score != null && <span className="evidence-score">score: {e.retrieval_score.toFixed(2)}</span>}
                                         </div>

@@ -511,6 +511,14 @@ body {
   flex-wrap: wrap;
 }
 
+.evidence-badge.external {
+  font-size: 0.7rem;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  background: #374151;
+  color: #93c5fd;
+}
+
 .evidence-source {
   text-decoration: underline;
   text-decoration-style: dotted;

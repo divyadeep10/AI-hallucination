@@ -54,6 +54,7 @@ class EvidenceResponse(BaseModel):
     source_url: Optional[str] = None
     snippet: str
     retrieval_score: Optional[float] = None
+    is_external: bool = False
 
 
 class VerificationDebugItem(BaseModel):

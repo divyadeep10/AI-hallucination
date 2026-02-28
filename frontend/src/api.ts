@@ -41,6 +41,7 @@ export type Evidence = {
   source_url: string | null;
   snippet: string;
   retrieval_score: number | null;
+  is_external?: boolean;
 };
 
 export type VerificationDebugItem = {
