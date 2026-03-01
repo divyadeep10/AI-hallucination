@@ -1,4 +1,5 @@
 import traceback
+from datetime import datetime
 
 from sqlalchemy.orm import Session
 
@@ -54,6 +55,7 @@ class PlannerAgent(Agent):
                 workflow = db.query(Workflow).filter(Workflow.id == workflow_id).first()
                 if workflow:
                     workflow.status = WorkflowStatus.FAILED.value
+                    workflow.completed_at = datetime.utcnow()
                     workflow.error_message = f"PlannerAgent error: {str(e)}"
                     db.add(workflow)
                     db.commit()

@@ -13,6 +13,7 @@ import {
   WorkflowDebugPayload,
   WorkflowStatus,
 } from "./api";
+import { ComparisonView } from "./ComparisonView";
 
 type QueryState = {
   answer: string | null;
@@ -95,26 +96,26 @@ function isStageCompleted(
   }
 }
 
-function getStageTimestamp(stage: (typeof TIMELINE_STAGES)[0], responses: StoredResponse[] | null, workflow: WorkflowStatus | null): string | null {
+function getStageTimestamp(stage: (typeof TIMELINE_STAGES)[0], responses: StoredResponse[] | null, workflow: WorkflowStatus | null, formatDateTimeFn: (s: string | null | undefined) => string): string | null {
   if (!workflow) return null;
   if (stage.agentType) {
     if (!responses) return null;
     const r = responses.find((x) => x.agent_type === stage.agentType);
-    return r ? new Date(r.timestamp).toLocaleString() : null;
+    return r ? formatDateTimeFn(r.timestamp) : null;
   }
   if (stage.minStatus === "PLANNED" && isStatusAtOrPast(workflow.status, "PLANNED") && workflow.created_at) {
-    return new Date(workflow.created_at).toLocaleString();
+    return formatDateTimeFn(workflow.created_at);
   }
   const st = workflow.stage_timestamps;
   if (st) {
     if (stage.key === "claim_extraction" && st.claims_extracted_at) {
-      return new Date(st.claims_extracted_at).toLocaleString();
+      return formatDateTimeFn(st.claims_extracted_at);
     }
     if (stage.key === "retrieval" && st.evidence_retrieved_at) {
-      return new Date(st.evidence_retrieved_at).toLocaleString();
+      return formatDateTimeFn(st.evidence_retrieved_at);
     }
     if (stage.key === "verification" && st.verified_at) {
-      return new Date(st.verified_at).toLocaleString();
+      return formatDateTimeFn(st.verified_at);
     }
   }
   return null;
@@ -141,7 +142,15 @@ function getStatusBadgeClass(status: string): string {
   if (["completed", "refined", "verified", "critic_reviewed", "evidence_retrieved", "claims_extracted", "generated", "planned", "created"].includes(s))
     return "bg-emerald-500/20 text-emerald-300";
   if (s === "failed") return "bg-red-500/20 text-red-300";
-  return "bg-slate-700 text-slate-400";
+  return "bg-white/10 text-slate-300";
+}
+
+/** Format ISO date string to local time; treat missing timezone as UTC so display is correct. */
+function formatDateTime(isoStr: string | null | undefined): string {
+  if (isoStr == null || isoStr === "") return "—";
+  const s = /(Z|[+-]\d{2}:?\d{2})$/.test(isoStr) ? isoStr : isoStr + "Z";
+  const date = new Date(s);
+  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString();
 }
 
 /** Renders text with **bold** and *italic* parsed; newlines preserved. Avoids showing raw asterisks. */
@@ -202,6 +211,7 @@ export function App() {
   const lastPolledStatusRef = useRef<string | null>(null);
   const errorCountRef = useRef<number>(0);
   const isPollingRef = useRef<boolean>(false);
+  const resultsSectionRef = useRef<HTMLDivElement>(null);
 
   // Terminal states that should stop polling
   const TERMINAL_STATES = ["COMPLETED", "FAILED"];
@@ -399,6 +409,8 @@ export function App() {
         status: response.status,
         statusDetails: null,
       });
+      // Scroll to results for accessibility
+      setTimeout(() => resultsSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 120);
     } catch (err) {
       const message = err instanceof Error ? err.message : "An unexpected error occurred.";
       setError(message);
@@ -434,6 +446,8 @@ export function App() {
         status: response.status,
         statusDetails: response,
       });
+      // Scroll to results for accessibility
+      setTimeout(() => resultsSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 120);
       // Polling will automatically start via useEffect when workflowId is set
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to start workflow.";
@@ -493,15 +507,22 @@ export function App() {
     try {
       const items = await fetchEvidenceForClaim(claimId);
       setEvidenceByClaim((prev) => ({ ...prev, [claimId]: items }));
-      setExpandedClaimId((prev) => (prev === claimId ? null : claimId));
+      // Do not toggle expand state here – leave it to the user; keeps panel open when evidence loads
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to load evidence.";
       setError(message);
     }
   };
 
-  const handleToggleClaimExpand = (claimId: number) => {
-    setExpandedClaimId((prev) => (prev === claimId ? null : claimId));
+  const handleToggleClaimExpand = (claimId: number, verificationStatus: string | null | undefined) => {
+    const nextExpanded = expandedClaimId === claimId ? null : claimId;
+    setExpandedClaimId(nextExpanded);
+    if (nextExpanded === null) return;
+    const isNoEvidence = (verificationStatus ?? "").toUpperCase() === "NO_EVIDENCE";
+    if (isNoEvidence) {
+      setEvidenceByClaim((prev) => ({ ...prev, [claimId]: [] }));
+      return;
+    }
     if (!evidenceByClaim[claimId]) {
       handleLoadEvidenceForClaim(claimId);
     }
@@ -528,323 +549,422 @@ export function App() {
     ...stage,
     completed: isStageCompleted(stage, responses, claims, state.statusDetails ?? null),
     failed: currentStatus === "FAILED",
-    timestamp: getStageTimestamp(stage, responses, state.statusDetails ?? null),
+    timestamp: getStageTimestamp(stage, responses, state.statusDetails ?? null, formatDateTime),
   }));
-
   return (
-    <div className="max-w-4xl mx-auto px-6 py-8 min-h-screen">
-      <header className="mb-10 pb-8 border-b border-slate-800/80 flex flex-col items-start">
-  
+    <>
+      <style dangerouslySetInnerHTML={{__html: `
+        @keyframes blob-morph {
+          0%   { border-radius: 60% 40% 30% 70% / 60% 30% 70% 40%; }
+          50%  { border-radius: 40% 60% 70% 30% / 50% 60% 30% 60%; }
+          100% { border-radius: 60% 40% 30% 70% / 60% 30% 70% 40%; }
+        }
+        @keyframes blob-spin {
+          from { transform: translate(-50%, -50%) rotate(0deg); }
+          to   { transform: translate(-50%, -50%) rotate(360deg); }
+        }
+        .liquid-blob {
+          position: absolute;
+          inset: 0;
+          background: radial-gradient(circle at 40% 30%, #684cf0 0%, #351c75 40%, #150a29 80%);
+          box-shadow: inset 0 20px 60px rgba(255,255,255,0.15), inset 0 -40px 80px rgba(0,0,0,0.8);
+          animation: blob-morph 12s ease-in-out infinite, blob-spin 30s linear infinite;
+        }
+        /* Hide scrollbar for clean UI */
+        .no-scrollbar::-webkit-scrollbar {
+          display: none;
+        }
+        .no-scrollbar {
+          -ms-overflow-style: none;
+          scrollbar-width: none;
+        }
+      `}} />
 
-        {/* Main Title with Gradient */}
-        <h1 className="m-0 mb-4 text-2xl sm:text-4xl font-extrabold tracking-tight text-slate-100 leading-tight">
-          Self-Correcting{' '}
-          <span className="text-transparent bg-clip-text bg-gradient-to-r from-sky-400 via-indigo-400 to-purple-400">
-            Multi-Agent AI
-          </span>
-        </h1>
-
-        {/* Description */}
-        <p className="m-0 text-slate-400 text-sm sm:text-base leading-relaxed max-w-[54ch]">
-          Ask a question for a baseline answer, or run the full pipeline and inspect claims, evidence, and the refinement timeline.
-        </p>
+      <div className="min-h-screen bg-[#0b0814] relative text-slate-100 font-sans selection:bg-purple-500/30 overflow-x-hidden">
         
-      </header>
+        {/* Liquid blob: fixed, centered in viewport using margin (avoids transform conflict with inner animation) */}
+        <div
+          className="fixed left-1/2 top-1/2 w-[600px] h-[600px] sm:w-[800px] sm:h-[800px] -ml-[300px] -mt-[300px] sm:-ml-[40px] sm:-mt-[40px] z-0 pointer-events-none select-none"
+          aria-hidden="true"
+        >
+          <div className="liquid-blob opacity-90" />
+        </div>
 
-      <main id="main-content" className="grid gap-6" aria-label="Main content">
-        <section className="bg-[#0c1222] rounded-xl p-6 border border-slate-800 shadow-lg">
-          <h2 className="m-0 mb-4 text-lg font-semibold text-slate-100 flex items-center gap-2 before:content-[''] before:w-1 before:h-5 before:rounded before:bg-gradient-to-b before:from-indigo-500 before:to-cyan-500">
-            Ask a Question
-          </h2>
-          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-            <label htmlFor="query-input" className="block font-medium text-sm text-slate-100">
-              Your question
-            </label>
-            <textarea
-              id="query-input"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Example: Explain why TCP performs poorly in wireless networks and compare it with QUIC."
-              rows={5}
-              className="block w-full min-h-[7rem] resize-y px-4 py-3 rounded-md border border-slate-600 bg-slate-900 text-slate-100 text-base font-sans leading-normal placeholder:text-slate-500 hover:border-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-colors"
-            />
-            <div className="flex flex-wrap gap-3">
-              <button
-                type="submit"
-                className="px-4 py-2 rounded-md font-medium text-white bg-gradient-to-br from-indigo-500 to-cyan-500 hover:from-indigo-600 hover:to-cyan-600 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-900 disabled:opacity-60 disabled:cursor-not-allowed transition-all"
-                disabled={isSubmitting}
-              >
-                {isSubmitting ? "Running..." : "Quick Run"}
-              </button>
-              <button
-                type="button"
-                className="px-4 py-2 rounded-md font-medium text-slate-200 bg-transparent border border-slate-600 hover:border-slate-500 hover:bg-slate-800/50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-900 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
-                onClick={handleStartAsyncWorkflow}
-                disabled={isStartingAsync}
-              >
-                {isStartingAsync ? "Starting..." : "Full Run"}
-              </button>
-            </div>
-          </form>
-          {error && (
-            <p className="mt-3 px-3 py-2 rounded-md bg-red-500/15 text-red-300 text-sm" role="alert">
-              {error}
+        {/* Subtle starry dots overlay for depth */}
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:32px_32px] pointer-events-none -z-20"></div>
+        {/* Navigation Bar */}
+        <nav className="relative z-50 flex items-center justify-between px-6 sm:px-8 py-6 w-full max-w-7xl mx-auto">
+          <div className="text-xl font-bold tracking-tight text-white">
+            MultiAgent AI
+          </div>
+          <div className="hidden md:flex items-center gap-8 text-sm text-slate-300">
+            <a href="#" className="hover:text-white transition-colors">About</a>
+            <a href="#" className="flex items-center gap-1 hover:text-white transition-colors">Trading <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg></a>
+            <a href="#" className="hover:text-white transition-colors">Contact</a>
+            <a href="#" className="hover:text-white transition-colors">FAQ</a>
+            <a href="#" className="flex items-center gap-1 hover:text-white transition-colors">ENG <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg></a>
+          </div>
+          <div className="flex items-center gap-4">
+            <button className="text-sm font-medium text-slate-300 hover:text-white transition-colors hidden sm:block">Login</button>
+            <button className="px-5 py-2 rounded-full text-sm font-medium text-white bg-gradient-to-r from-indigo-500 to-purple-500 hover:opacity-90 transition-opacity shadow-lg shadow-purple-500/20">Sign up</button>
+          </div>
+        </nav>
+        <div className="relative z-10 max-w-5xl mx-auto px-6 pt-24 pb-24 flex flex-col items-center">
+          
+          {/* Header Section (With positive z-index to stay ABOVE the blob) */}
+          <header className="relative z-20 mb-16 flex flex-col items-center text-center">
+            <h1 className="m-0 mb-6 text-5xl sm:text-7xl font-extrabold tracking-tight text-white leading-[1.1]">
+              Self-Correcting <br className="hidden sm:block"/>
+              Multi-Agent AI
+            </h1>
+            <p className="m-0 text-[#9ba1a6] text-base sm:text-lg leading-relaxed max-w-[60ch]">
+              Unlock your knowledge potential in a fully automated environment, powered by multi-agent reasoning. Ask a question to begin.
             </p>
-          )}
-        </section>
+          </header>
 
-        <section className="bg-[#0c1222] rounded-xl p-6 border border-slate-800 shadow-lg">
-          <h2 className="m-0 mb-4 text-lg font-semibold text-slate-100 flex items-center gap-2 before:content-[''] before:w-1 before:h-5 before:rounded before:bg-gradient-to-b before:from-indigo-500 before:to-cyan-500">
-            Answer
-          </h2>
-          {state.answer ? (
-            <div className="rounded-md bg-slate-800/50 p-4 border border-slate-700/50">
-              <p className="m-0 text-slate-200 leading-relaxed">{formatResponseText(state.answer)}</p>
-            </div>
-          ) : state.workflowId && currentStatus === "REFINED" ? (
-            responses ? (
-              <div className="rounded-md bg-slate-800/50 p-4 border border-slate-700/50">
-                <p className="m-0 text-slate-200 leading-relaxed">
-                  {formatResponseText(responses.find((r) => r.agent_type === "REFINER")?.response_text ?? "Refined answer not available yet.")}
-                </p>
-              </div>
-            ) : (
-              <p className="text-slate-500 text-sm italic">
-                Waiting for refined answer to be generated...
-              </p>
-            )
-          ) : (
-            <p className="text-slate-500 text-sm italic">
-              Submit a question for a quick answer, or run the full pipeline to see a verified, refined answer here.
-            </p>
-          )}
-        </section>
-
-        <section className="bg-[#0c1222] rounded-xl p-6 border border-slate-800 shadow-lg">
-          <h2 className="m-0 mb-4 text-lg font-semibold text-slate-100 flex items-center gap-2 before:content-[''] before:w-1 before:h-5 before:rounded before:bg-gradient-to-b before:from-indigo-500 before:to-cyan-500">
-            Workflow status &amp; timeline
-          </h2>
-          {state.workflowId ? (
-            <>
-              <div className="flex flex-wrap gap-4 mb-4">
-                <p className="m-0 text-slate-300 text-sm"><strong className="text-slate-200">Workflow ID</strong> {state.workflowId}</p>
-                <p className="m-0 text-slate-300 text-sm flex items-center gap-2 flex-wrap">
-                  <strong className="text-slate-200">Status</strong>{" "}
-                  <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getStatusBadgeClass(currentStatus || "unknown")}`}>
-                    {currentStatus || "N/A"}
-                  </span>
-                  {pollingIntervalRef.current !== null && !TERMINAL_STATES.includes(currentStatus) && (
-                    <span className="text-cyan-400/90 text-xs" aria-live="polite">Auto-updating</span>
-                  )}
-                </p>
-              </div>
-              {state.statusDetails?.error_message && (
-                <div className="mb-4 px-3 py-2 rounded-md bg-red-500/15 text-red-300 text-sm" role="alert">
-                  <strong>Error:</strong> {state.statusDetails.error_message}
-                </div>
-              )}
-              <div className="flex flex-wrap gap-2 mb-4">
-                <button
-                  type="button"
-                  className="px-3 py-1.5 rounded text-sm font-medium text-slate-200 border border-slate-600 hover:border-slate-500 hover:bg-slate-800/50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-900 disabled:opacity-60 disabled:cursor-not-allowed"
-                  onClick={handleCheckStatus}
-                  disabled={isCheckingStatus}
-                >
-                  {isCheckingStatus ? "Checking..." : "Refresh status"}
-                </button>
-                <button
-                  type="button"
-                  className="px-3 py-1.5 rounded text-sm font-medium text-slate-200 border border-slate-600 hover:border-slate-500 hover:bg-slate-800/50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-900 disabled:opacity-60 disabled:cursor-not-allowed"
-                  onClick={handleLoadResponses}
-                  disabled={isLoadingResponses}
-                >
-                  {isLoadingResponses ? "Loading..." : "Load stored responses"}
-                </button>
-                <button
-                  type="button"
-                  className="px-3 py-1.5 rounded text-sm font-medium text-slate-200 border border-slate-600 hover:border-slate-500 hover:bg-slate-800/50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-900 disabled:opacity-60 disabled:cursor-not-allowed"
-                  onClick={handleLoadClaims}
-                  disabled={isLoadingClaims}
-                >
-                  {isLoadingClaims ? "Loading..." : "Load claims"}
-                </button>
-              </div>
-              {pollingIntervalRef.current !== null && !TERMINAL_STATES.includes(currentStatus) && (
-                <p className="text-slate-500 text-xs italic mb-4">
-                  Timeline and data are automatically updating every 2 seconds
-                </p>
-              )}
-              {state.statusDetails && (
-                <div className="mb-4 space-y-1 text-slate-400 text-sm">
-                  <p className="m-0"><strong className="text-slate-300">Created at:</strong> {new Date(state.statusDetails.created_at).toLocaleString()}</p>
-                  <p className="m-0"><strong className="text-slate-300">Completed at:</strong> {state.statusDetails.completed_at ? new Date(state.statusDetails.completed_at).toLocaleString() : "—"}</p>
-                </div>
-              )}
-
-              <div className="mb-6">
-                <h3 className="mt-4 mb-2 text-base font-semibold text-slate-100">Pipeline timeline</h3>
-                <ul className="list-none m-0 p-0 space-y-0" role="list">
-                  {timelineStagesWithState.map((stage) => (
-                    <li
-                      key={stage.key}
-                      className={`flex items-center gap-3 py-2 border-b border-slate-800 last:border-b-0 ${stage.completed ? "text-slate-200" : "text-slate-500"} ${stage.failed && !stage.completed ? "text-red-400" : ""}`}
-                    >
-                      <span
-                        className={`shrink-0 w-2 h-2 rounded-full ${stage.completed ? (stage.failed ? "bg-red-500" : "bg-emerald-500") : "bg-slate-600"}`}
-                        aria-hidden="true"
+          <main id="main-content" className="w-full relative" aria-label="Main content">
+            
+            {/* Chatbot Form Wrapper */}
+            <div className="relative w-full flex justify-center mb-16 pt-10">
+              <div className="w-full max-w-2xl relative">
+                <form onSubmit={handleSubmit} className="flex flex-col gap-4 relative">
+                  <div className="relative group">
+                    <div className="absolute -inset-1 bg-gradient-to-r from-purple-500 to-indigo-500 rounded-[2rem] blur opacity-25 group-hover:opacity-40 transition duration-1000 group-hover:duration-200"></div>
+                    <div className="relative bg-[#0d0a1a]/80 backdrop-blur-xl rounded-[2rem] border border-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.5)] p-2">
+                      <textarea
+                        id="query-input"
+                        value={query}
+                        onChange={(e) => setQuery(e.target.value)}
+                        placeholder="Ask anything... (e.g., Explain why TCP performs poorly in wireless networks)"
+                        rows={3}
+                        className="block w-full resize-none px-6 py-4 bg-transparent text-white text-lg placeholder:text-slate-400 outline-none focus:ring-0 border-none transition-colors no-scrollbar relative z-40"
                       />
-                      <span className="font-medium text-sm">{stage.label}</span>
-                      {(stage.timestamp || (stage.completed && !stage.timestamp)) && (
-                        <span className="ml-auto text-xs text-slate-500 tabular-nums">
-                          {stage.timestamp ?? "—"}
-                        </span>
-                      )}
-                    </li>
-                  ))}
-                </ul>
+                      <div className="flex flex-wrap items-center justify-end gap-3 px-4 pb-3 pt-2 relative z-40">
+                        <button
+                          type="button"
+                          className="px-6 py-2.5 rounded-full font-medium text-white bg-transparent hover:bg-white/5 border border-transparent hover:border-white/10 focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:opacity-60 disabled:cursor-not-allowed transition-all"
+                          onClick={handleStartAsyncWorkflow}
+                          disabled={isStartingAsync}
+                        >
+                          {isStartingAsync ? "Starting..." : "Full Pipeline Run"}
+                        </button>
+                        <button
+                          type="submit"
+                          className="px-8 py-2.5 rounded-full font-semibold text-[#080510] bg-white hover:bg-slate-200 shadow-[0_0_20px_rgba(255,255,255,0.2)] focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-[#080510] disabled:opacity-60 disabled:cursor-not-allowed transition-all"
+                          disabled={isSubmitting}
+                        >
+                          {isSubmitting ? "Running..." : "Quick Run"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </form>
+                {error && (
+                  <div className="mt-6 px-6 py-4 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm backdrop-blur-md text-center max-w-md mx-auto relative z-30" role="alert">
+                    {error}
+                  </div>
+                )}
               </div>
+            </div>
 
-              {responses && (
-                <div className="mb-6">
-                  <h3 className="mt-4 mb-2 text-base font-semibold text-slate-100">Stored responses</h3>
-                  {responses.length === 0 ? (
-                    <p className="text-slate-500 text-sm italic m-0">No stored responses for this workflow yet.</p>
-                  ) : (
-                    <ul className="list-none m-0 p-0 space-y-4">
-                      {responses.map((item) => (
-                        <li key={item.id} className="rounded-md bg-slate-800/40 p-3 border border-slate-700/50">
-                          <div className="flex flex-wrap items-center gap-2 mb-2 text-sm text-slate-400">
-                            <span className="px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 text-xs font-medium">{item.agent_type}</span>
-                            <span>{new Date(item.timestamp).toLocaleString()}</span>
-                            {item.model_used && <span className="text-slate-500">Model: {item.model_used}</span>}
-                          </div>
-                          <div className="text-slate-200 text-sm leading-relaxed whitespace-pre-wrap">{formatResponseText(item.response_text)}</div>
-                        </li>
-                      ))}
-                    </ul>
+            {/* Content Sections (Output) – scroll target; each section is its own card, no single broad wrapper */}
+            <div id="results-section" ref={resultsSectionRef} className="max-w-4xl mx-auto space-y-8 relative z-20 scroll-mt-6">
+              
+              {/* Post-refinement comparison (when REFINED and both responses exist) or single Response section */}
+              {(state.answer || state.workflowId) && (() => {
+                const generatorResponse = responses?.find((r) => r.agent_type === "GENERATOR")?.response_text;
+                const refinedResponse = responses?.find((r) => r.agent_type === "REFINER")?.response_text;
+                const showComparison = currentStatus === "REFINED" && generatorResponse != null && refinedResponse != null && generatorResponse !== "" && refinedResponse !== "";
+                if (showComparison) {
+                  return (
+                    <ComparisonView
+                      generatorResponse={generatorResponse}
+                      refinedResponse={refinedResponse}
+                      claims={claims ?? []}
+                      formatResponseText={formatResponseText}
+                    />
+                  );
+                }
+                return (
+                  <section className="rounded-2xl p-6 sm:p-10 border border-slate-600 shadow-xl" style={{ backgroundColor: "#0d0a1a" }} aria-labelledby="response-heading">
+                    <h2 id="response-heading" className="m-0 mb-6 text-xl font-bold tracking-tight text-white flex items-center gap-3">
+                      <span className="w-2 h-6 rounded-full bg-gradient-to-b from-purple-400 to-indigo-500" aria-hidden="true"></span>
+                      Response
+                    </h2>
+                    {state.answer ? (
+                      <div className="text-slate-200 text-lg leading-relaxed font-light">
+                        {formatResponseText(state.answer)}
+                      </div>
+                    ) : state.workflowId && currentStatus === "REFINED" ? (
+                      responses ? (
+                        <div className="text-slate-200 text-lg leading-relaxed font-light">
+                          {formatResponseText(responses.find((r) => r.agent_type === "REFINER")?.response_text ?? "Refined answer not available yet.")}
+                        </div>
+                      ) : (
+                        <p className="text-slate-400 text-base animate-pulse">
+                          Waiting for refined answer to be generated...
+                        </p>
+                      )
+                    ) : (
+                      <div className="flex items-center gap-4 text-slate-400 text-base">
+                        <div className="w-5 h-5 rounded-full border-2 border-purple-500 border-t-transparent animate-spin"></div>
+                        Pipeline active, gathering verified insights...
+                      </div>
+                    )}
+                  </section>
+                );
+              })()}
+
+              {/* Workflow & Timeline – standalone section */}
+              {state.workflowId && (
+                <section className="rounded-2xl p-6 sm:p-10 border border-slate-600 shadow-xl" style={{ backgroundColor: "#0d0a1a" }} aria-labelledby="workflow-heading">
+                  <h2 id="workflow-heading" className="m-0 mb-8 text-xl font-bold tracking-tight text-white flex items-center gap-3">
+                    <span className="w-2 h-6 rounded-full bg-gradient-to-b from-purple-400 to-indigo-500" aria-hidden="true"></span>
+                    Workflow & Timeline
+                  </h2>
+                  
+                  {state.statusDetails?.error_message && (
+                    <div className="mb-8 px-5 py-4 rounded-xl bg-[#2a1515] border border-red-500/40 text-red-300 text-sm" role="alert">
+                      <strong>Error:</strong> {state.statusDetails.error_message}
+                    </div>
                   )}
-                </div>
-              )}
+                  
+                  {state.statusDetails && (
+                    <div className="mb-10 grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6 text-sm p-5 sm:p-6 rounded-xl border border-slate-600" style={{ backgroundColor: "#252230" }}>
+                      <div className="flex flex-col gap-1">
+                        <span className="text-slate-500 text-xs font-medium uppercase tracking-wider">Created</span>
+                        <span className="text-slate-200 font-mono text-sm">{formatDateTime(state.statusDetails.created_at)}</span>
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <span className="text-slate-500 text-xs font-medium uppercase tracking-wider">Completed</span>
+                        <span className="text-slate-200 font-mono text-sm">{formatDateTime(state.statusDetails.completed_at)}</span>
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <span className="text-slate-500 text-xs font-medium uppercase tracking-wider">Current Status</span>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold ${getStatusBadgeClass(currentStatus || "unknown")}`}>
+                            {currentStatus || "N/A"}
+                          </span>
+                          {pollingIntervalRef.current !== null && !TERMINAL_STATES.includes(currentStatus) && (
+                            <span className="flex h-2 w-2 shrink-0 relative overflow-hidden rounded-full" aria-hidden="true">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-purple-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-2 w-2 bg-purple-500"></span>
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
-              {claims && (
-                <div className="mb-6">
-                  <h3 className="mt-4 mb-2 text-base font-semibold text-slate-100">Claim-level explanation</h3>
-                  <p className="text-slate-500 text-xs mb-3 m-0">Click a claim to expand evidence and verification score.</p>
-                  {claims.length === 0 ? (
-                    <p className="text-slate-500 text-sm italic m-0">No claims extracted yet. Run the async pipeline and load claims after CLAIMS_EXTRACTED.</p>
-                  ) : (
-                    <ul className="list-none m-0 p-0 space-y-3">
-                      {claims.map((c) => {
-                        const evidence = evidenceByClaim[c.id] ?? [];
-                        const isExpanded = expandedClaimId === c.id;
-                        const borderClass = getVerificationStatusBorderClass(c.verification_status);
-                        const badgeClass = getVerificationStatusBadgeClass(c.verification_status);
+                  <div className="mb-12">
+                    <h3 className="mt-0 mb-6 text-xs font-bold tracking-widest uppercase text-slate-400">Pipeline Timeline</h3>
+                    <ul className="list-none m-0 p-0 relative" role="list" aria-label="Pipeline stages">
+                      {timelineStagesWithState.map((stage, index) => {
+                        const prevCompleted = index > 0 && timelineStagesWithState[index - 1].completed;
+                        const segmentFilled = prevCompleted;
+                        const segmentColor = currentStatus === "FAILED" && timelineStagesWithState[index - 1]?.failed
+                          ? "#ef4444"
+                          : segmentFilled
+                            ? "#a855f7"
+                            : "#475569";
                         return (
-                          <li key={c.id} className={`rounded-md border-l-4 ${borderClass} bg-slate-800/30 pl-3 pr-3 py-2`}>
-                            <button
-                              type="button"
-                              className="w-full text-left flex flex-wrap items-center gap-2 py-1 rounded focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-900"
-                              onClick={() => handleToggleClaimExpand(c.id)}
-                              aria-expanded={isExpanded}
-                              aria-controls={`claim-evidence-${c.id}`}
-                              id={`claim-toggle-${c.id}`}
-                            >
-                              <span className="flex-1 min-w-0 text-slate-200 text-sm font-medium">{c.claim_text}</span>
-                              <span className={`shrink-0 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${badgeClass}`}>
-                                {c.verification_status ?? "—"}
+                          <li
+                            key={stage.key}
+                            className={`relative flex items-center justify-between gap-4 ${stage.completed ? "text-slate-200" : "text-slate-500"} ${stage.failed && !stage.completed ? "text-red-400" : ""}`}
+                          >
+                            {/* Left: stage label */}
+                            <div className="flex-1 min-w-0 pr-5 text-right py-3">
+                              <span className="font-semibold text-base text-inherit leading-snug break-words">
+                                {stage.label}
                               </span>
-                              {c.verification_confidence != null && (
-                                <span className="shrink-0 text-slate-500 text-xs tabular-nums">
-                                  {(c.verification_confidence * 100).toFixed(0)}%
+                            </div>
+                            {/* Center: connector segment (line above dot) + dot */}
+                            <div className="flex-shrink-0 w-6 flex flex-col items-center">
+                              {/* Line segment between previous dot and this dot – visible and fills on completion */}
+                              {index > 0 && (
+                                <div
+                                  className="w-1 rounded-full flex-shrink-0 transition-colors duration-300"
+                                  style={{ height: "1.5rem", backgroundColor: segmentColor }}
+                                  aria-hidden="true"
+                                />
+                              )}
+                              <span
+                                className={`block w-4 h-4 rounded-full border-2 border-[#211e28] shrink-0 ${stage.completed ? (stage.failed ? "bg-red-500" : "bg-purple-500") : "bg-slate-600"}`}
+                                aria-hidden="true"
+                              />
+                            </div>
+                            {/* Right: timestamp */}
+                            <div className="flex-1 min-w-0 pl-5 text-left py-3">
+                              {(stage.timestamp || (stage.completed && !stage.timestamp)) && (
+                                <span className="text-sm text-slate-500 tabular-nums font-mono block break-words">
+                                  {stage.timestamp ?? "—"}
                                 </span>
                               )}
-                            </button>
-                            {c.entities.length > 0 && (
-                              <div className="text-slate-500 text-xs mt-1">{c.entities.join(" · ")}</div>
-                            )}
-                            {c.extraction_confidence != null && (
-                              <div className="text-slate-500 text-xs mt-0.5">Extraction confidence: {(c.extraction_confidence * 100).toFixed(0)}%</div>
-                            )}
-                            {isExpanded && (
-                              <div className="mt-3 pt-3 border-t border-slate-700/50" id={`claim-evidence-${c.id}`} aria-labelledby={`claim-toggle-${c.id}`}>
-                                {evidence.length === 0 ? (
-                                  <p className="text-slate-500 text-sm italic m-0">Loading evidence…</p>
-                                ) : (
-                                  <ul className="list-none m-0 p-0 space-y-3">
-                                    {evidence.map((e) => (
-                                      <li key={e.id} className="rounded-md bg-slate-800/50 p-3 border border-slate-700/50">
-                                        <div className="text-slate-200 text-sm leading-relaxed mb-2">{formatResponseText(e.snippet)}</div>
-                                        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                                          {e.is_external && <span className="px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 font-medium">External</span>}
-                                          {e.source_url && <span className="truncate max-w-full" title={e.source_url}>{e.source_url}</span>}
-                                          {e.retrieval_score != null && <span>score: {e.retrieval_score.toFixed(2)}</span>}
-                                        </div>
-                                      </li>
-                                    ))}
-                                  </ul>
-                                )}
-                              </div>
-                            )}
+                            </div>
                           </li>
                         );
                       })}
                     </ul>
-                  )}
-                </div>
-              )}
-
-              <div className="mt-6 pt-4 border-t border-slate-800">
-                <h3 className="mt-0 mb-3 text-base font-semibold text-slate-100">Developer / debug</h3>
-                <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer mb-3">
-                  <input
-                    type="checkbox"
-                    checked={developerMode}
-                    onChange={(e) => setDeveloperMode(e.target.checked)}
-                    className="rounded border-slate-600 bg-slate-800 text-indigo-500 focus:ring-indigo-500"
-                  />
-                  Developer mode
-                </label>
-                <button
-                  type="button"
-                  className="px-3 py-1.5 rounded text-sm font-medium text-slate-200 border border-slate-600 hover:border-slate-500 hover:bg-slate-800/50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-900 disabled:opacity-60 disabled:cursor-not-allowed"
-                  onClick={handleLoadDebug}
-                  disabled={isLoadingDebug}
-                >
-                  {isLoadingDebug ? "Loading…" : "Load raw JSON"}
-                </button>
-                {developerMode && debugPayload && (
-                  <div className="mt-4">
-                    <div className="flex flex-wrap gap-1 mb-2">
-                      {(["workflow", "responses", "claims", "verifications"] as const).map((tab) => (
-                        <button
-                          key={tab}
-                          type="button"
-                          className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
-                            debugTab === tab
-                              ? "bg-indigo-500/30 text-indigo-200 border border-indigo-500/50"
-                              : "bg-slate-800/50 text-slate-400 border border-slate-700 hover:bg-slate-700/50 hover:text-slate-300"
-                          }`}
-                          onClick={() => setDebugTab(tab)}
-                        >
-                          {tab}
-                        </button>
-                      ))}
-                    </div>
-                    <pre className="m-0 p-4 rounded-md bg-slate-900 border border-slate-700 text-slate-300 text-xs overflow-auto max-h-80 font-mono">
-                      {debugTab === "workflow" && JSON.stringify(debugPayload.workflow, null, 2)}
-                      {debugTab === "responses" && JSON.stringify(debugPayload.responses, null, 2)}
-                      {debugTab === "claims" && JSON.stringify(debugPayload.claims, null, 2)}
-                      {debugTab === "verifications" && JSON.stringify(debugPayload.verifications, null, 2)}
-                    </pre>
                   </div>
-                )}
-              </div>
-            </>
-          ) : (
-            <p className="text-slate-500 text-sm italic m-0">Run the full pipeline to see workflow status, timeline, and claim-level evidence here.</p>
-          )}
-        </section>
-      </main>
-    </div>
+
+                  {responses && (
+                    <div className="mb-12">
+                      <h3 className="mt-0 mb-5 text-xs font-bold tracking-widest uppercase text-slate-400">Stored Responses</h3>
+                      {responses.length === 0 ? (
+                        <p className="text-slate-500 text-sm italic m-0 p-6 rounded-xl border border-slate-600 text-center" style={{ backgroundColor: "#252230" }}>No stored responses for this workflow yet.</p>
+                      ) : (
+                        <ul className="list-none m-0 p-0 space-y-4">
+                          {responses.map((item) => (
+                            <li key={item.id} className="rounded-xl p-6 border border-slate-600 hover:border-slate-500 transition-colors" style={{ backgroundColor: "#252230" }}>
+                              <div className="flex flex-wrap items-center gap-4 mb-4 text-sm">
+                                <span className="px-3 py-1.5 rounded-full bg-purple-500/10 text-purple-300 border border-purple-500/20 text-xs font-bold uppercase tracking-wider">{item.agent_type}</span>
+                                <span className="text-slate-500 font-mono text-xs">{formatDateTime(item.timestamp)}</span>
+                                {item.model_used && <span className="text-slate-500 ml-auto px-3 py-1.5 rounded-full text-[10px] font-mono border border-white/5 uppercase tracking-wider">{item.model_used}</span>}
+                              </div>
+                              <div className="text-slate-200 text-base leading-relaxed whitespace-pre-wrap font-light">{formatResponseText(item.response_text)}</div>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+
+                  {claims && (
+                    <div className="mb-10">
+                      <h3 className="mt-0 mb-6 text-xs font-bold tracking-widest uppercase text-slate-500 flex justify-between items-center">
+                        Claim-Level Explanation
+                        <span className="text-slate-600 text-[10px] normal-case font-normal italic">Tap to expand evidence</span>
+                      </h3>
+                      
+                      {claims.length === 0 ? (
+                        <p className="text-slate-500 text-sm italic m-0 p-6 rounded-xl border border-slate-600 text-center" style={{ backgroundColor: "#252230" }}>No claims extracted yet. Run the async pipeline and load claims after CLAIMS_EXTRACTED.</p>
+                      ) : (
+                        <ul className="list-none m-0 p-0 space-y-3">
+                          {claims.map((c) => {
+                            const evidence = evidenceByClaim[c.id] ?? [];
+                            const isExpanded = expandedClaimId === c.id;
+                            const borderClass = getVerificationStatusBorderClass(c.verification_status);
+                            const badgeClass = getVerificationStatusBadgeClass(c.verification_status);
+                            
+                            return (
+                              <li key={c.id} className={`rounded-xl border-l-4 ${borderClass} border-r border-t border-b border-slate-600 transition-colors overflow-hidden`} style={{ backgroundColor: isExpanded ? "#2a2732" : "#252230" }}>
+                                <button
+                                  type="button"
+                                  className="w-full text-left flex flex-col sm:flex-row sm:items-center gap-4 p-5 focus:outline-none"
+                                  onClick={() => handleToggleClaimExpand(c.id, c.verification_status)}
+                                  aria-expanded={isExpanded}
+                                  aria-controls={`claim-evidence-${c.id}`}
+                                  id={`claim-toggle-${c.id}`}
+                                >
+                                  <span className="flex-1 min-w-0 text-slate-200 text-base font-medium leading-relaxed">{c.claim_text}</span>
+                                  <div className="flex items-center gap-4 shrink-0">
+                                    {c.verification_confidence != null && (
+                                      <span className="text-slate-500 text-xs tabular-nums font-mono">
+                                        {(c.verification_confidence * 100).toFixed(0)}%
+                                      </span>
+                                    )}
+                                    <span className={`inline-flex items-center px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest ${badgeClass}`}>
+                                      {c.verification_status ?? "—"}
+                                    </span>
+                                  </div>
+                                </button>
+                                
+                                {isExpanded && (
+                                  <div className="px-5 pb-5" id={`claim-evidence-${c.id}`} aria-labelledby={`claim-toggle-${c.id}`}>
+                                    <div className="flex flex-wrap gap-3 text-[10px] text-slate-500 uppercase tracking-widest mb-5 pt-4 border-t border-white/5">
+                                      {c.entities.length > 0 && <span>Tags: {c.entities.join(", ")}</span>}
+                                      {c.extraction_confidence != null && <span className="ml-auto">Confidence: {(c.extraction_confidence * 100).toFixed(0)}%</span>}
+                                    </div>
+                                    
+                                    {evidence.length === 0 ? (
+                                      <p className="text-slate-500 text-sm m-0 p-4 rounded-xl text-center border border-slate-600" style={{ backgroundColor: "#252230" }}>
+                                        {evidenceByClaim[c.id] === undefined && (c.verification_status ?? "").toUpperCase() !== "NO_EVIDENCE"
+                                          ? "Loading verification evidence…"
+                                          : "No evidence"}
+                                      </p>
+                                    ) : (
+                                      <ul className="list-none m-0 p-0 space-y-3">
+                                        {evidence.map((e) => (
+                                          <li key={e.id} className="rounded-xl p-4 border border-slate-600" style={{ backgroundColor: "#252230" }}>
+                                            <div className="text-slate-200 text-sm leading-relaxed mb-4 font-light">{formatResponseText(e.snippet)}</div>
+                                            <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
+                                              {e.is_external && <span className="px-2 py-1 rounded border border-purple-500/20 text-purple-400 bg-purple-500/5 font-medium tracking-wide">External</span>}
+                                              {e.source_url && <a href={e.source_url} target="_blank" rel="noreferrer" className="truncate max-w-[200px] sm:max-w-xs hover:text-purple-400 transition-colors" title={e.source_url}>{e.source_url}</a>}
+                                            </div>
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    )}
+                                  </div>
+                                )}
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="pt-8 border-t border-white/5">
+                    <div className="flex items-center justify-between mb-6">
+                      <h3 className="m-0 text-xs font-bold tracking-widest uppercase text-slate-500">Developer Tools</h3>
+                      <label className="flex items-center gap-2 text-sm text-slate-400 cursor-pointer hover:text-slate-200 transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={developerMode}
+                          onChange={(e) => setDeveloperMode(e.target.checked)}
+                          className="rounded bg-black/50 border-white/20 text-purple-500 focus:ring-purple-500 focus:ring-offset-0 focus:ring-offset-transparent"
+                        />
+                        Debug Mode
+                      </label>
+                    </div>
+                    
+                    {developerMode && (
+                      <button
+                        type="button"
+                        className="px-5 py-2.5 rounded-full text-sm font-medium text-slate-200 bg-white/5 border border-white/10 hover:bg-white/10 focus:outline-none transition-colors mb-6"
+                        onClick={handleLoadDebug}
+                        disabled={isLoadingDebug}
+                      >
+                        {isLoadingDebug ? "Loading…" : "Load Raw JSON"}
+                      </button>
+                    )}
+                    
+                    {developerMode && debugPayload && (
+                      <div className="mt-2">
+                        <div className="flex flex-wrap gap-2 mb-4 bg-black/20 p-1.5 rounded-xl inline-flex border border-white/5">
+                          {(["workflow", "responses", "claims", "verifications"] as const).map((tab) => (
+                            <button
+                              key={tab}
+                              type="button"
+                              className={`px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all ${
+                                debugTab === tab
+                                  ? "bg-purple-500/20 text-purple-300 shadow-sm"
+                                  : "text-slate-500 hover:text-slate-300 hover:bg-white/5"
+                              }`}
+                              onClick={() => setDebugTab(tab)}
+                            >
+                              {tab}
+                            </button>
+                          ))}
+                        </div>
+                        <div className="rounded-2xl bg-[#0a0614] border border-white/10 overflow-hidden shadow-inner">
+                          <pre className="m-0 p-6 text-[#a5d6ff] text-xs overflow-auto max-h-[500px] font-mono scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
+                            {debugTab === "workflow" && JSON.stringify(debugPayload.workflow, null, 2)}
+                            {debugTab === "responses" && JSON.stringify(debugPayload.responses, null, 2)}
+                            {debugTab === "claims" && JSON.stringify(debugPayload.claims, null, 2)}
+                            {debugTab === "verifications" && JSON.stringify(debugPayload.verifications, null, 2)}
+                          </pre>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </section>
+              )}
+            </div>
+          </main>
+        </div>
+      </div>
+    </>
   );
 }

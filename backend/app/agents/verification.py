@@ -1,5 +1,6 @@
 import asyncio
 import traceback
+from datetime import datetime
 
 from sqlalchemy.orm import Session
 
@@ -119,6 +120,7 @@ class VerificationAgent(Agent):
                 workflow = db.query(Workflow).filter(Workflow.id == workflow_id).first()
                 if workflow:
                     workflow.status = WorkflowStatus.FAILED.value
+                    workflow.completed_at = datetime.utcnow()
                     workflow.error_message = f"VerificationAgent error: {str(e)}"
                     db.add(workflow)
                     db.commit()

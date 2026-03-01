@@ -444,8 +444,8 @@ def list_claim_evidence(
     db: Session = Depends(get_db),
 ) -> list[EvidenceResponse]:
     """
-    Return evidence rows for a single claim, ordered by retrieval_score descending
-    (fallback to id when score is null).
+    Return only evidence that was matched (used in a verification) for this claim.
+    Ordered by retrieval_score descending (fallback to id when score is null).
     """
     claim = db.query(Claim).filter(Claim.id == claim_id).first()
     if not claim:
@@ -453,10 +453,23 @@ def list_claim_evidence(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Claim with id {claim_id} not found.",
         )
-    query = db.query(Evidence).filter(Evidence.claim_id == claim_id)
-    # Order by retrieval_score when present, otherwise by id for stability.
+    # Only evidence that is linked in a Verification for this claim (matched evidence)
+    matched_evidence_ids = (
+        db.query(Verification.evidence_id)
+        .filter(
+            Verification.claim_id == claim_id,
+            Verification.evidence_id.isnot(None),
+        )
+        .distinct()
+        .subquery()
+    )
     evidence_items = (
-        query.order_by(Evidence.retrieval_score.desc().nullslast(), Evidence.id.asc())
+        db.query(Evidence)
+        .filter(
+            Evidence.claim_id == claim_id,
+            Evidence.id.in_(matched_evidence_ids),
+        )
+        .order_by(Evidence.retrieval_score.desc().nullslast(), Evidence.id.asc())
         .all()
     )
     return [

@@ -1,5 +1,6 @@
 import asyncio
 import traceback
+from datetime import datetime
 
 from sqlalchemy.orm import Session
 
@@ -45,6 +46,7 @@ class GeneratorAgent(Agent):
             except LLMProviderNotConfiguredError as llm_error:
                 print(f"[AGENT] GeneratorAgent: LLM provider not configured: {llm_error}")
                 workflow.status = WorkflowStatus.FAILED.value
+                workflow.completed_at = datetime.utcnow()
                 workflow.error_message = f"GeneratorAgent: LLM provider not configured - {str(llm_error)}"
                 db.add(workflow)
                 db.commit()
@@ -78,6 +80,7 @@ class GeneratorAgent(Agent):
                 workflow = db.query(Workflow).filter(Workflow.id == workflow_id).first()
                 if workflow:
                     workflow.status = WorkflowStatus.FAILED.value
+                    workflow.completed_at = datetime.utcnow()
                     workflow.error_message = f"GeneratorAgent error: {str(e)}"
                     db.add(workflow)
                     db.commit()
