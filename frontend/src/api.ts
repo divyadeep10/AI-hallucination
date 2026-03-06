@@ -42,6 +42,7 @@ export type Evidence = {
   snippet: string;
   retrieval_score: number | null;
   is_external?: boolean;
+  source?: string | null; // 'internal' | 'wikipedia' | 'wikidata' | 'external'
 };
 
 export type VerificationDebugItem = {

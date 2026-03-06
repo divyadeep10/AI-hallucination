@@ -111,20 +111,17 @@ Phase 4 adds claim-level extraction from the generator draft (PDF §20):
 Phase 5 – Retrieval Layer (Hybrid-ready)
 ----------------------------------------
 
-Phase 5 introduces the evidence retrieval layer (PDF §21):
+Phase 5 introduces the evidence retrieval layer (PDF §21) with **three sources** before verification:
 
-- Database: An `evidence` table with `id`, `claim_id`, `source_url`, `snippet`, `retrieval_score`.
-- Retrieval module: `retrieve_evidence_for_claim` in `app.retrieval` defines the hybrid
-  retrieval API. The current implementation returns a safe placeholder snippet based
-  on the claim text and is structured so it can be replaced with a real BM25 +
-  embeddings retriever later.
-- Agent: `RetrieverAgent` runs after claim extraction, iterates over all claims for a
-  workflow, calls the retrieval module, stores `Evidence` rows, and moves the workflow
-  to `EVIDENCE_RETRIEVED`.
-- API: `POST /api/workflows` enqueues planner → generator → claim extractor → retriever.
-  `GET /api/claims/{claim_id}/evidence` returns evidence items for a claim.
-- Frontend: Each claim in the "Extracted Claims" list has a "Load Evidence" button that
-  fetches and displays snippets, source URLs (when present), and retrieval scores.
+- **Pipeline**: Internal knowledge base → Wikipedia (API) → Wikidata (API) → combine → Verification.
+- Database: An `evidence` table with `id`, `claim_id`, `source_url`, `snippet`, `retrieval_score`, `is_external`, and `source` (`internal` | `wikipedia` | `wikidata` | `external`).
+- Retrieval modules:
+  - **Internal**: `retrieve_evidence_for_claim` in `app.retrieval` (hybrid BM25 + embeddings over knowledge base).
+  - **Wikipedia**: `retrieve_wikipedia_evidence` in `app.retrieval_wikipedia` — public MediaWiki API (search + extract), no key, no Playwright.
+  - **Wikidata**: `retrieve_wikidata_evidence` in `app.retrieval_wikidata` — public APIs (wbsearchentities, EntityData JSON), no key, no Playwright.
+- Agent: `RetrieverAgent` runs after claim extraction, fetches from all three sources per claim, combines and caps at 10 per claim, stores `Evidence` with `source` set, and moves the workflow to `EVIDENCE_RETRIEVED`. Optional env: `WIKIPEDIA_RETRIEVAL_ENABLED`, `WIKIDATA_RETRIEVAL_ENABLED` (default true).
+- API: `GET /api/claims/{claim_id}/evidence` returns evidence with `source` for UI badges.
+- Frontend: Claim-level evidence shows source badges (Internal, Wikipedia, Wikidata, External) and snippets with links.
 
 Phase 6 – Verification, Critic, and Refinement
 ----------------------------------------------

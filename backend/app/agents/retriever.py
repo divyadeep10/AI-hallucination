@@ -1,3 +1,4 @@
+import os
 import traceback
 from datetime import datetime
 
@@ -8,6 +9,13 @@ from app.db import SessionLocal
 from app.models import Claim, Evidence, Response, Workflow
 from app.models.workflow import WorkflowStatus
 from app.retrieval import retrieve_evidence_for_claim
+from app.retrieval_wikipedia import retrieve_wikipedia_evidence
+from app.retrieval_wikidata import retrieve_wikidata_evidence
+
+# Optional: disable Wikipedia or Wikidata retrieval via env (default both on)
+WIKIPEDIA_RETRIEVAL_ENABLED = os.getenv("WIKIPEDIA_RETRIEVAL_ENABLED", "true").lower() in ("1", "true", "yes")
+WIKIDATA_RETRIEVAL_ENABLED = os.getenv("WIKIDATA_RETRIEVAL_ENABLED", "true").lower() in ("1", "true", "yes")
+MAX_EVIDENCE_PER_CLAIM = 10
 
 
 class RetrieverAgent(Agent):
@@ -53,16 +61,35 @@ class RetrieverAgent(Agent):
             evidence_count = 0
             for claim in claims:
                 try:
-                    evidence_items = retrieve_evidence_for_claim(claim.claim_text)
+                    # Internal KB (hybrid retrieval)
+                    evidence_items = list(retrieve_evidence_for_claim(claim.claim_text or ""))
+                    # Wikipedia (textual explanation, no Playwright)
+                    if WIKIPEDIA_RETRIEVAL_ENABLED:
+                        try:
+                            evidence_items.extend(retrieve_wikipedia_evidence(claim.claim_text or ""))
+                        except Exception as wiki_err:
+                            print(f"[AGENT] RetrieverAgent: Wikipedia retrieval failed for claim {claim.id}: {wiki_err}")
+                    # Wikidata (structured facts, no Playwright)
+                    if WIKIDATA_RETRIEVAL_ENABLED:
+                        try:
+                            evidence_items.extend(retrieve_wikidata_evidence(claim.claim_text or ""))
+                        except Exception as wd_err:
+                            print(f"[AGENT] RetrieverAgent: Wikidata retrieval failed for claim {claim.id}: {wd_err}")
+                    # Sort by retrieval_score desc, cap total per claim
+                    evidence_items.sort(key=lambda x: (x.get("retrieval_score") or 0.0), reverse=True)
+                    evidence_items = evidence_items[:MAX_EVIDENCE_PER_CLAIM]
                     for item in evidence_items:
                         snippet = (item.get("snippet") or "").strip()
                         if not snippet:
                             continue
+                        source = item.get("source") or "internal"
                         evidence = Evidence(
                             claim_id=claim.id,
                             source_url=item.get("source_url"),
                             snippet=snippet,
                             retrieval_score=item.get("retrieval_score"),
+                            source=source,
+                            is_external=source not in (None, "internal"),
                         )
                         db.add(evidence)
                         evidence_count += 1

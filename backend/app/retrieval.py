@@ -92,6 +92,7 @@ def retrieve_evidence_for_claim(claim_text: str) -> list[dict[str, Any]]:
                     "source_url": chunk.source,
                     "snippet": snippet,
                     "retrieval_score": score,
+                    "source": "internal",
                 }
             )
         return results

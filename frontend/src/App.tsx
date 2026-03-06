@@ -888,7 +888,17 @@ export function App() {
                                           <li key={e.id} className="rounded-xl p-4 border border-slate-600" style={{ backgroundColor: "#252230" }}>
                                             <div className="text-slate-200 text-sm leading-relaxed mb-4 font-light">{formatResponseText(e.snippet)}</div>
                                             <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
-                                              {e.is_external && <span className="px-2 py-1 rounded border border-purple-500/20 text-purple-400 bg-purple-500/5 font-medium tracking-wide">External</span>}
+                                              {e.source && (
+                                                <span className={`px-2 py-1 rounded font-medium tracking-wide border ${
+                                                  e.source === "wikipedia" ? "border-sky-500/30 text-sky-400 bg-sky-500/10" :
+                                                  e.source === "wikidata" ? "border-amber-500/30 text-amber-400 bg-amber-500/10" :
+                                                  e.source === "external" ? "border-purple-500/20 text-purple-400 bg-purple-500/5" :
+                                                  "border-slate-500/30 text-slate-400 bg-slate-500/10"
+                                                }`}>
+                                                  {e.source === "internal" ? "Internal" : e.source.charAt(0).toUpperCase() + e.source.slice(1)}
+                                                </span>
+                                              )}
+                                              {!e.source && e.is_external && <span className="px-2 py-1 rounded border border-purple-500/20 text-purple-400 bg-purple-500/5 font-medium tracking-wide">External</span>}
                                               {e.source_url && <a href={e.source_url} target="_blank" rel="noreferrer" className="truncate max-w-[200px] sm:max-w-xs hover:text-purple-400 transition-colors" title={e.source_url}>{e.source_url}</a>}
                                             </div>
                                           </li>

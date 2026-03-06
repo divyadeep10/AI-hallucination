@@ -28,4 +28,6 @@ class Evidence(Base):
     retrieval_score = Column(Float, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     is_external = Column(Boolean, nullable=False, default=False)
+    # Source label for UI: 'internal' | 'wikipedia' | 'wikidata' | 'external' (Playwright)
+    source = Column(String(50), nullable=True)
 

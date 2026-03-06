@@ -15,19 +15,41 @@ export type ComparisonViewProps = {
 function computeImprovementSummary(claims: Claim[]) {
   const total = claims.length;
   if (total === 0) {
-    return { total: 0, supported: 0, contradicted: 0, unverifiable: 0, supportedPct: 0 };
+    return {
+      total: 0,
+      supported: 0,
+      contradicted: 0,
+      unverifiable: 0,
+      unsupported: 0,
+      reliabilityPct: 0,
+    };
   }
   let supported = 0;
   let contradicted = 0;
   let unverifiable = 0;
+  let unsupported = 0; // NO_EVIDENCE or CONTRADICTED
   for (const c of claims) {
     const s = (c.verification_status ?? "").toUpperCase();
     if (s === "SUPPORTED") supported += 1;
-    else if (s === "CONTRADICTED") contradicted += 1;
-    else unverifiable += 1;
+    else if (s === "CONTRADICTED") {
+      contradicted += 1;
+      unsupported += 1;
+    } else if (s === "NO_EVIDENCE") {
+      unverifiable += 1;
+      unsupported += 1;
+    } else {
+      unverifiable += 1;
+    }
   }
-  const supportedPct = Math.round((supported / total) * 100);
-  return { total, supported, contradicted, unverifiable, supportedPct };
+  const reliabilityPct = Math.round((supported / total) * 100);
+  return {
+    total,
+    supported,
+    contradicted,
+    unverifiable,
+    unsupported,
+    reliabilityPct,
+  };
 }
 
 function renderDiff(draft: string, refined: string, formatText: (t: string) => React.ReactNode): React.ReactNode {
@@ -163,26 +185,18 @@ export function ComparisonView({
             <span aria-hidden>🔍</span> Improvement summary
           </h2>
           <ul className="list-none m-0 p-0 space-y-2 text-slate-300 text-sm leading-relaxed">
-            {summary.supported > 0 && (
-              <li>
-                • Supported claims: <strong className="text-emerald-400/90">{summary.supported}</strong> of {summary.total} ({summary.supportedPct}%)
-              </li>
-            )}
-            {summary.contradicted > 0 && (
-              <li>
-                • Contradictions identified and addressed: <strong className="text-amber-400/90">{summary.contradicted}</strong>
-              </li>
-            )}
-            {summary.unverifiable > 0 && (
-              <li>
-                • Unverifiable claims refined: <strong className="text-slate-400">{summary.unverifiable}</strong>
-              </li>
-            )}
-            {(summary.supported > 0 || summary.contradicted > 0 || summary.unverifiable > 0) && (
-              <li className="text-slate-400 pt-2 border-t border-slate-600/80">
-                Clarity enhanced by verification-backed refinement.
-              </li>
-            )}
+            <li>
+              • Reliability: {summary.reliabilityPct}%
+            </li>
+            <li>
+              • Unsupported claims removed: {summary.unsupported}
+            </li>
+            <li>
+              • Verified claims: {summary.supported} / {summary.total}
+            </li>
+            <li className="text-slate-400 pt-2 border-t border-slate-600/80">
+              Clarity enhanced by verification-backed refinement.
+            </li>
           </ul>
         </motion.section>
       )}

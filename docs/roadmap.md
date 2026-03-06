@@ -76,6 +76,12 @@ Phase 5 – Retrieval Layer (Hybrid: Embeddings + BM25) [IMPLEMENTED - STRUCTURE
 5.4 – Evidence Visualization
 - Frontend adds \"Load Evidence\" controls on each claim, calling
   `GET /api/claims/{claim_id}/evidence` and displaying snippets, source URLs, and scores.
+5.5 – Wikipedia + Wikidata Retrieval [IMPLEMENTED]
+- Evidence pipeline: Internal KB → Wikipedia (API) → Wikidata (API) → combine → Verification.
+- `app/retrieval_wikipedia.py`: MediaWiki API (search + extract), no key, no Playwright.
+- `app/retrieval_wikidata.py`: wbsearchentities + EntityData JSON + wbgetentities for labels, no key.
+- `Evidence.source` added (`internal` | `wikipedia` | `wikidata` | `external`); frontend shows source badges.
+- Env: `WIKIPEDIA_RETRIEVAL_ENABLED`, `WIKIDATA_RETRIEVAL_ENABLED` (default true). See docs/WIKIDATA_WIKIPEDIA_RETRIEVAL.md.
 Phase 6 – Verification, Critic, and Refinement [IMPLEMENTED]
 6.1 – Verification Table & NLI Integration
 - `verification` table added with id (verification_id), claim_id, status, confidence_score, evidence_id.

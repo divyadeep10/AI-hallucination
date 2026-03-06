@@ -63,6 +63,7 @@ class ExternalRetrievalAgent(Agent):
                 return
 
             print(f"[AGENT] ExternalRetrievalAgent: running web search (Playwright), second layer")
+            # Use full user query for Playwright (no stripping); Wikipedia/Wikidata APIs use stripped main topic per claim
             query = (workflow.user_query or "").strip()
             external_items = run_external_pipeline(query)
             if not external_items:
@@ -99,6 +100,7 @@ class ExternalRetrievalAgent(Agent):
                         snippet=snippet,
                         retrieval_score=item.get("retrieval_score"),
                         is_external=True,
+                        source=item.get("source") or "external",
                     )
                     db.add(evidence)
                     db.flush()

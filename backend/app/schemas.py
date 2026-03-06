@@ -55,6 +55,7 @@ class EvidenceResponse(BaseModel):
     snippet: str
     retrieval_score: Optional[float] = None
     is_external: bool = False
+    source: Optional[str] = None  # 'internal' | 'wikipedia' | 'wikidata' | 'external'
 
 
 class VerificationDebugItem(BaseModel):

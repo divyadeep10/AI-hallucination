@@ -418,6 +418,7 @@ def get_workflow_debug(
                 snippet=e.snippet,
                 retrieval_score=e.retrieval_score,
                 is_external=getattr(e, "is_external", False),
+                source=getattr(e, "source", None),
             )
             for e in evidence_items
         ],
@@ -480,6 +481,7 @@ def list_claim_evidence(
             snippet=e.snippet,
             retrieval_score=e.retrieval_score,
             is_external=getattr(e, "is_external", False),
+            source=getattr(e, "source", None),
         )
         for e in evidence_items
     ]
